@@ -506,73 +506,74 @@ async def query_documents(request: QueryRequest):
     Uses user-provided API keys from session, or falls back to environment variables.
     """
     import time
+    import traceback
     
     start_time = time.time()
     
-    # Validate session
-    if request.session_id not in sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
-    
-    session = sessions[request.session_id]
-    
-    if not session["documents"]:
-        raise HTTPException(status_code=400, detail="No documents uploaded in this session")
-    
-    # Get API keys - prioritize request body, then session, then environment
-    api_keys = session.get("api_keys", {})
-    
-    root_provider = request.root_provider or api_keys.get("root_provider", "openai")
-    sub_provider = request.sub_provider or api_keys.get("sub_provider", "openai")
-    root_model = request.root_model or api_keys.get("root_model", "gpt-4o")
-    sub_model = request.sub_model or api_keys.get("sub_model", "gpt-4o-mini")
-    
-    # Helper to get API key for a provider
-    def get_key_for_provider(provider):
-        provider = provider.lower()
-        
-        # Map provider names to their API key sources
-        key_mapping = {
-            "openai": (request.openai_api_key, "openai_api_key", "OPENAI_API_KEY"),
-            "anthropic": (request.anthropic_api_key, "anthropic_api_key", "ANTHROPIC_API_KEY"),
-            "google": (request.google_api_key, "google_api_key", "GOOGLE_API_KEY"),
-            "gemini": (request.google_api_key, "google_api_key", "GOOGLE_API_KEY"),
-            "kimi": (request.kimi_api_key, "kimi_api_key", "KIMI_API_KEY"),
-            "moonshot": (request.kimi_api_key, "kimi_api_key", "MOONSHOT_API_KEY"),
-            "groq": (request.groq_api_key, "groq_api_key", "GROQ_API_KEY"),
-            "together": (request.together_api_key, "together_api_key", "TOGETHER_API_KEY"),
-            "mistral": (request.mistral_api_key, "mistral_api_key", "MISTRAL_API_KEY"),
-            "cohere": (request.cohere_api_key, "cohere_api_key", "COHERE_API_KEY"),
-            "deepseek": (request.deepseek_api_key, "deepseek_api_key", "DEEPSEEK_API_KEY"),
-            "perplexity": (request.perplexity_api_key, "perplexity_api_key", "PERPLEXITY_API_KEY"),
-            "azure": (request.azure_api_key, "azure_api_key", "AZURE_OPENAI_KEY"),
-        }
-        
-        if provider in key_mapping:
-            req_key, session_key, env_key = key_mapping[provider]
-            return req_key or api_keys.get(session_key) or os.getenv(env_key)
-        elif provider == "ollama":
-            return "ollama"
-        elif provider == "mock":
-            return "mock"
-        
-        return None
-    
-    root_key = get_key_for_provider(root_provider)
-    sub_key = get_key_for_provider(sub_provider)
-    
-    # Validate API keys
-    if root_provider not in ["ollama", "mock"] and not root_key:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"{root_provider.upper()} API key required. Please set your API key in the UI."
-        )
-    if sub_provider not in ["ollama", "mock"] and not sub_key:
-        raise HTTPException(
-            status_code=400,
-            detail=f"{sub_provider.upper()} API key required for sub-model."
-        )
-    
     try:
+        # Validate session
+        if request.session_id not in sessions:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        session = sessions[request.session_id]
+        
+        if not session["documents"]:
+            raise HTTPException(status_code=400, detail="No documents uploaded in this session")
+        
+        # Get API keys - prioritize request body, then session, then environment
+        api_keys = session.get("api_keys", {})
+        
+        root_provider = request.root_provider or api_keys.get("root_provider", "openai")
+        sub_provider = request.sub_provider or api_keys.get("sub_provider", "openai")
+        root_model = request.root_model or api_keys.get("root_model", "gpt-4o")
+        sub_model = request.sub_model or api_keys.get("sub_model", "gpt-4o-mini")
+        
+        # Helper to get API key for a provider
+        def get_key_for_provider(provider):
+            provider = provider.lower()
+            
+            # Map provider names to their API key sources
+            key_mapping = {
+                "openai": (request.openai_api_key, "openai_api_key", "OPENAI_API_KEY"),
+                "anthropic": (request.anthropic_api_key, "anthropic_api_key", "ANTHROPIC_API_KEY"),
+                "google": (request.google_api_key, "google_api_key", "GOOGLE_API_KEY"),
+                "gemini": (request.google_api_key, "google_api_key", "GOOGLE_API_KEY"),
+                "kimi": (request.kimi_api_key, "kimi_api_key", "KIMI_API_KEY"),
+                "moonshot": (request.kimi_api_key, "kimi_api_key", "MOONSHOT_API_KEY"),
+                "groq": (request.groq_api_key, "groq_api_key", "GROQ_API_KEY"),
+                "together": (request.together_api_key, "together_api_key", "TOGETHER_API_KEY"),
+                "mistral": (request.mistral_api_key, "mistral_api_key", "MISTRAL_API_KEY"),
+                "cohere": (request.cohere_api_key, "cohere_api_key", "COHERE_API_KEY"),
+                "deepseek": (request.deepseek_api_key, "deepseek_api_key", "DEEPSEEK_API_KEY"),
+                "perplexity": (request.perplexity_api_key, "perplexity_api_key", "PERPLEXITY_API_KEY"),
+                "azure": (request.azure_api_key, "azure_api_key", "AZURE_OPENAI_KEY"),
+            }
+            
+            if provider in key_mapping:
+                req_key, session_key, env_key = key_mapping[provider]
+                return req_key or api_keys.get(session_key) or os.getenv(env_key)
+            elif provider == "ollama":
+                return "ollama"
+            elif provider == "mock":
+                return "mock"
+            
+            return None
+        
+        root_key = get_key_for_provider(root_provider)
+        sub_key = get_key_for_provider(sub_provider)
+        
+        # Validate API keys
+        if root_provider not in ["ollama", "mock"] and not root_key:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"{root_provider.upper()} API key required. Please set your API key in the UI."
+            )
+        if sub_provider not in ["ollama", "mock"] and not sub_key:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{sub_provider.upper()} API key required for sub-model."
+            )
+        
         # Load documents from disk
         documents = []
         for doc_info in session["documents"]:
@@ -638,10 +639,12 @@ async def query_documents(request: QueryRequest):
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Query error: {str(e)}")
+        logger.error(traceback.format_exc())
         processing_time = time.time() - start_time
         return QueryResponse(
             success=False,
-            error=str(e),
+            error=f"Server error: {str(e)}",
             iterations=0,
             sub_lm_calls=0,
             processing_time_seconds=round(processing_time, 2)
