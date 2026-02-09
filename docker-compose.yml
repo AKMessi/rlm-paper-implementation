@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  rlm-app:
+    build: .
+    container_name: rlm-app
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - RLM_ROOT_PROVIDER=${RLM_ROOT_PROVIDER:-mock}
+      - RLM_SUB_PROVIDER=${RLM_SUB_PROVIDER:-mock}
+      - RLM_ROOT_MODEL=${RLM_ROOT_MODEL:-gpt-4o}
+      - RLM_SUB_MODEL=${RLM_SUB_MODEL:-gpt-4o-mini}
+      - HOST=0.0.0.0
+      - PORT=8000
+    volumes:
+      - ./uploads:/app/uploads
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Add Redis for caching and session storage
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: rlm-redis
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+  #   restart: unless-stopped
+
+  # Optional: Add Nginx reverse proxy
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: rlm-nginx
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/nginx.conf
+  #     - ./ssl:/etc/nginx/ssl
+  #   depends_on:
+  #     - rlm-app
+  #   restart: unless-stopped
+
+# volumes:
+#   redis_data:

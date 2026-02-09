@@ -1,0 +1,38 @@
+# Render.com Blueprint
+# Deploy to Render: https://render.com/blueprints
+
+services:
+  - type: web
+    name: rlm-app
+    runtime: python
+    plan: standard  # Use 'starter' for free tier
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 2
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: RLM_ROOT_PROVIDER
+        value: openai
+      - key: RLM_SUB_PROVIDER
+        value: openai
+      - key: RLM_ROOT_MODEL
+        value: gpt-4o
+      - key: RLM_SUB_MODEL
+        value: gpt-4o-mini
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 8000
+      # Add these in Render Dashboard:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+    disk:
+      name: uploads
+      mountPath: /app/uploads
+      sizeGB: 2
+    autoDeploy: true

@@ -182,6 +182,42 @@ Key innovations:
 - Symbolic recursion for unbounded context processing
 - Post-training recipe for native RLM behavior
 
+## 🚀 Deployment
+
+### Option 1: Docker (Recommended)
+
+```bash
+# Build and run
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+```
+
+### Option 2: Render.com (Free)
+
+1. Fork/push this repo to GitHub
+2. Connect to [Render](https://render.com)
+3. Add environment variables:
+   - `OPENAI_API_KEY`
+4. Deploy!
+
+### Option 3: Railway.app (Free)
+
+```bash
+# Install Railway CLI
+npm install -g @railway/cli
+
+# Deploy
+railway login
+railway init
+railway up
+```
+
+### Option 4: VPS (DigitalOcean, AWS, etc.)
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed instructions.
+
 ## 🧪 Testing
 
 Run tests:
@@ -206,3 +242,8 @@ MIT License - See LICENSE file
 
 - Original paper authors: Alex L. Zhang, Tim Kraska, Omar Khattab
 - MIT CSAIL for the research
+
+## 📚 Documentation
+
+- [Deployment Guide](DEPLOYMENT.md) - Comprehensive deployment instructions
+- [Implementation Summary](IMPLEMENTATION_SUMMARY.md) - Technical details

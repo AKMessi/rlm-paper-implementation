@@ -1,0 +1,23 @@
+name: Deploy to Render
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Deploy to Render
+      env:
+        deploy_url: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+      run: |
+        if [ -n "$deploy_url" ]; then
+          curl "$deploy_url"
+          echo "Deployed to Render!"
+        else
+          echo "RENDER_DEPLOY_HOOK_URL not set. Skipping deployment."
+        fi
