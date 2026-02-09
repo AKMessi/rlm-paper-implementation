@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RLM - Recursive Language Model</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #6366f1;
+            --primary-dark: #4f46e5;
+            --secondary: #ec4899;
+            --background: #0f172a;
+            --surface: #1e293b;
+            --surface-light: #334155;
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: #475569;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --error: #ef4444;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--background);
+            color: var(--text);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            text-align: center;
+            padding: 40px 20px;
+            background: linear-gradient(135deg, var(--surface) 0%, var(--surface-light) 100%);
+            border-radius: 16px;
+            margin-bottom: 30px;
+            border: 1px solid var(--border);
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 10px;
+        }
+
+        header p {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+        }
+
+        .badge {
+            display: inline-block;
+            background: var(--primary);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 10px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 900px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .card {
+            background: var(--surface);
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .card h2 {
+            font-size: 1.25rem;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .card h2 .icon {
+            width: 24px;
+            height: 24px;
+            background: var(--primary);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+        }
+
+        .drop-zone {
+            border: 2px dashed var(--border);
+            border-radius: 8px;
+            padding: 40px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: var(--surface-light);
+        }
+
+        .drop-zone:hover, .drop-zone.dragover {
+            border-color: var(--primary);
+            background: rgba(99, 102, 241, 0.1);
+        }
+
+        .drop-zone .icon-large {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+
+        .drop-zone p {
+            color: var(--text-muted);
+        }
+
+        .drop-zone .file-types {
+            font-size: 0.85rem;
+            margin-top: 8px;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn:hover {
+            background: var(--primary-dark);
+            transform: translateY(-1px);
+        }
+
+        .btn:disabled {
+            background: var(--surface-light);
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: var(--surface-light);
+        }
+
+        .btn-secondary:hover {
+            background: var(--border);
+        }
+
+        .file-list {
+            margin-top: 20px;
+        }
+
+        .file-item {
+            background: var(--surface-light);
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .file-item .name {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .file-item .remove {
+            background: none;
+            border: none;
+            color: var(--error);
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+
+        .file-item .remove:hover {
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        .query-section {
+            margin-top: 20px;
+        }
+
+        textarea {
+            width: 100%;
+            background: var(--background);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+            color: var(--text);
+            font-size: 1rem;
+            resize: vertical;
+            min-height: 100px;
+            font-family: inherit;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        .options {
+            display: flex;
+            gap: 20px;
+            margin: 16px 0;
+            flex-wrap: wrap;
+        }
+
+        .option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-muted);
+        }
+
+        input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--primary);
+        }
+
+        .results {
+            background: var(--surface);
+            border-radius: 12px;
+            padding: 24px;
+            margin-top: 20px;
+            border: 1px solid var(--border);
+        }
+
+        .results h3 {
+            margin-bottom: 16px;
+            color: var(--primary);
+        }
+
+        .answer {
+            background: var(--background);
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid var(--primary);
+            line-height: 1.8;
+            white-space: pre-wrap;
+        }
+
+        .stats {
+            display: flex;
+            gap: 20px;
+            margin-top: 16px;
+            flex-wrap: wrap;
+        }
+
+        .stat {
+            background: var(--surface-light);
+            padding: 12px 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat .value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--primary);
+        }
+
+        .stat .label {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            gap: 12px;
+        }
+
+        .spinner {
+            width: 24px;
+            height: 24px;
+            border: 3px solid var(--border);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--error);
+            color: var(--error);
+            padding: 16px;
+            border-radius: 8px;
+            margin-top: 16px;
+        }
+
+        .success {
+            background: rgba(34, 197, 94, 0.1);
+            border: 1px solid var(--success);
+            color: var(--success);
+            padding: 16px;
+            border-radius: 8px;
+            margin-top: 16px;
+        }
+
+        .session-info {
+            background: var(--surface-light);
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .session-id {
+            font-family: monospace;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        .how-it-works {
+            margin-top: 30px;
+            padding: 30px;
+            background: linear-gradient(135deg, var(--surface) 0%, var(--surface-light) 100%);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+        }
+
+        .how-it-works h2 {
+            margin-bottom: 20px;
+            color: var(--primary);
+        }
+
+        .steps {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+
+        .step {
+            background: var(--background);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+
+        .step .number {
+            width: 32px;
+            height: 32px;
+            background: var(--primary);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+
+        .step h4 {
+            margin-bottom: 8px;
+        }
+
+        .step p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Code block styling */
+        pre {
+            background: #1a1a2e;
+            padding: 16px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+
+        code {
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Recursive Language Model (RLM)</h1>
+            <p>Process arbitrarily long documents using recursive LLM retrieval</p>
+            <span class="badge">RLM Powered</span>
+        </header>
+
+        <div class="session-info">
+            <div>
+                Session ID: <span class="session-id" id="sessionId">Creating...</span>
+            </div>
+            <button class="btn btn-secondary" onclick="resetSession()">New Session</button>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <h2><span class="icon">[DOC]</span> Upload Documents</h2>
+                
+                <div class="drop-zone" id="dropZone">
+                    <div class="icon-large">[FOLDER]</div>
+                    <p>Drag & drop files here or click to browse</p>
+                    <div class="file-types">Supports: PDF, TXT, DOCX, MD, JSON, Code files</div>
+                    <input type="file" id="fileInput" multiple accept=".pdf,.txt,.docx,.md,.markdown,.json,.py,.js,.java,.cpp,.c,.h,.ts,.tsx,.jsx">
+                </div>
+
+                <div class="file-list" id="fileList"></div>
+            </div>
+
+            <div class="card">
+                <h2><span class="icon">[Q]</span> Ask Questions</h2>
+                
+                <div class="query-section">
+                    <textarea id="queryInput" placeholder="Enter your question about the uploaded documents...&#10;&#10;Example: 'What are the main points discussed in the document?'&#10;&#10;The RLM will recursively search through the documents to find answers."></textarea>
+                    
+                    <div class="options">
+                        <label class="option">
+                            <input type="checkbox" id="useSubcalls" checked>
+                            <span>Use recursive sub-calls (RLM)</span>
+                        </label>
+                        <label class="option">
+                            <input type="number" id="maxIterations" value="50" min="10" max="100" style="width: 60px; background: var(--background); border: 1px solid var(--border); border-radius: 4px; padding: 4px; color: var(--text);">
+                            <span>Max iterations</span>
+                        </label>
+                    </div>
+
+                    <button class="btn" id="queryBtn" onclick="submitQuery()" disabled>
+                        <span>[SEARCH]</span> Query with RLM
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div id="results" class="results hidden">
+            <h3>Results</h3>
+            <div id="resultsContent"></div>
+        </div>
+
+        <div class="how-it-works">
+            <h2>How RLM Works</h2>
+            <div class="steps">
+                <div class="step">
+                    <div class="number">1</div>
+                    <h4>Upload</h4>
+                    <p>Upload documents of any size. The system automatically chunks them for processing.</p>
+                </div>
+                <div class="step">
+                    <div class="number">2</div>
+                    <h4>REPL Environment</h4>
+                    <p>Documents are loaded into a REPL as variables. The LLM can programmatically examine them.</p>
+                </div>
+                <div class="step">
+                    <div class="number">3</div>
+                    <h4>Recursive Calls</h4>
+                    <p>The root LLM calls sub-LLMs on chunks, aggregating results for efficient retrieval.</p>
+                </div>
+                <div class="step">
+                    <div class="number">4</div>
+                    <h4>Answer</h4>
+                    <p>Results are combined iteratively until a complete answer is produced.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Session management
+        let sessionId = null;
+        let uploadedFiles = [];
+        const API_URL = '';  // Same origin
+
+        // Initialize
+        async function initSession() {
+            sessionId = localStorage.getItem('rlm_session_id');
+            if (sessionId) {
+                try {
+                    const response = await fetch(`${API_URL}/sessions/${sessionId}`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        document.getElementById('sessionId').textContent = sessionId.substring(0, 8) + '...';
+                        uploadedFiles = data.documents || [];
+                        updateFileList();
+                        return;
+                    }
+                } catch (e) {
+                    console.error('Failed to restore session:', e);
+                }
+            }
+            createNewSession();
+        }
+
+        function createNewSession() {
+            sessionId = generateUUID();
+            localStorage.setItem('rlm_session_id', sessionId);
+            document.getElementById('sessionId').textContent = sessionId.substring(0, 8) + '...';
+            uploadedFiles = [];
+            updateFileList();
+        }
+
+        function resetSession() {
+            localStorage.removeItem('rlm_session_id');
+            createNewSession();
+            document.getElementById('results').classList.add('hidden');
+        }
+
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = Math.random() * 16 | 0;
+                const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        // File upload handling
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+
+        dropZone.addEventListener('click', () => fileInput.click());
+        
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        async function handleFiles(files) {
+            const formData = new FormData();
+            formData.append('session_id', sessionId);
+            
+            for (const file of files) {
+                formData.append('files', file);
+            }
+
+            dropZone.innerHTML = '<div class="loading"><div class="spinner"></div>Uploading...</div>';
+
+            try {
+                const response = await fetch(`${API_URL}/upload-multiple`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    uploadedFiles = [...uploadedFiles, ...data.documents];
+                    updateFileList();
+                    showNotification(`Uploaded ${data.documents.length} file(s) successfully`, 'success');
+                } else {
+                    showNotification(data.message || 'Upload failed', 'error');
+                }
+            } catch (error) {
+                showNotification('Upload failed: ' + error.message, 'error');
+            } finally {
+                dropZone.innerHTML = `
+                    <div class="icon-large">[UPLOAD]</div>
+                    <p>Drag & drop files here or click to browse</p>
+                    <div class="file-types">Supports: PDF, TXT, DOCX, MD, JSON, Code files</div>
+                `;
+            }
+        }
+
+        function updateFileList() {
+            const fileList = document.getElementById('fileList');
+            const queryBtn = document.getElementById('queryBtn');
+
+            if (uploadedFiles.length === 0) {
+                fileList.innerHTML = '';
+                queryBtn.disabled = true;
+                return;
+            }
+
+            fileList.innerHTML = uploadedFiles.map((file, index) => `
+                <div class="file-item">
+                    <div class="name">
+                        <span>[FILE]</span>
+                        <span>${file.filename}</span>
+                        <small style="color: var(--text-muted);">(${(file.total_chars / 1000).toFixed(1)}K chars, ${file.num_chunks} chunks)</small>
+                    </div>
+                    <button class="remove" onclick="removeFile(${index})">X</button>
+                </div>
+            `).join('');
+
+            queryBtn.disabled = false;
+        }
+
+        async function removeFile(index) {
+            uploadedFiles.splice(index, 1);
+            updateFileList();
+        }
+
+        // Query handling
+        async function submitQuery() {
+            const query = document.getElementById('queryInput').value.trim();
+            if (!query) {
+                showNotification('Please enter a question', 'error');
+                return;
+            }
+
+            if (uploadedFiles.length === 0) {
+                showNotification('Please upload at least one document', 'error');
+                return;
+            }
+
+            const useSubcalls = document.getElementById('useSubcalls').checked;
+            const maxIterations = parseInt(document.getElementById('maxIterations').value) || 50;
+
+            const resultsDiv = document.getElementById('results');
+            const resultsContent = document.getElementById('resultsContent');
+
+            resultsDiv.classList.remove('hidden');
+            resultsContent.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <span>Processing with RLM... This may take a minute.</span>
+                </div>
+            `;
+
+            try {
+                const response = await fetch(`${API_URL}/query`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        session_id: sessionId,
+                        query: query,
+                        use_subcalls: useSubcalls,
+                        max_iterations: maxIterations
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    resultsContent.innerHTML = `
+                        <div class="answer">${escapeHtml(data.answer)}</div>
+                        <div class="stats">
+                            <div class="stat">
+                                <div class="value">${data.iterations}</div>
+                                <div class="label">Iterations</div>
+                            </div>
+                            <div class="stat">
+                                <div class="value">${data.sub_lm_calls}</div>
+                                <div class="label">Sub-LM Calls</div>
+                            </div>
+                            <div class="stat">
+                                <div class="value">${data.processing_time_seconds}s</div>
+                                <div class="label">Time</div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    resultsContent.innerHTML = `
+                        <div class="error">
+                            <strong>Error:</strong> ${escapeHtml(data.error || 'Unknown error')}
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                resultsContent.innerHTML = `
+                    <div class="error">
+                        <strong>Error:</strong> ${escapeHtml(error.message)}
+                    </div>
+                `;
+            }
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            return text
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/\n/g, '<br>');
+        }
+
+        function showNotification(message, type) {
+            // Simple notification - could be enhanced
+            console.log(`[${type}] ${message}`);
+        }
+
+        // Initialize on load
+        document.addEventListener('DOMContentLoaded', initSession);
+    </script>
+</body>
+</html>
