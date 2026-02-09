@@ -1264,6 +1264,14 @@
             `;
 
             try {
+                // Get provider and model settings from the UI
+                const rootProvider = document.getElementById('rootProvider').value;
+                const subProvider = document.getElementById('subProvider').value === 'same' 
+                    ? rootProvider 
+                    : document.getElementById('subProvider').value;
+                const rootModel = document.getElementById('rootModel').value;
+                const subModel = document.getElementById('subModel').value;
+                
                 const response = await fetch(`${API_URL}/query`, {
                     method: 'POST',
                     headers: {
@@ -1273,9 +1281,18 @@
                         session_id: sessionId,
                         query: query,
                         use_subcalls: useSubcalls,
-                        max_iterations: maxIterations
+                        max_iterations: maxIterations,
+                        root_provider: rootProvider,
+                        sub_provider: subProvider,
+                        root_model: rootModel,
+                        sub_model: subModel
                     })
                 });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.detail || errorData.error || `Server error: ${response.status}`);
+                }
 
                 const data = await response.json();
 
