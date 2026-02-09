@@ -52,7 +52,7 @@ class QueryRequest(BaseModel):
     session_id: str
     query: str
     use_subcalls: bool = True
-    max_iterations: int = 50
+    max_iterations: int = 10
     # User-provided API keys
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None

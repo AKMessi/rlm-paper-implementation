@@ -268,7 +268,9 @@ class GeminiClient(BaseLLMClient):
         temperature: float = 0.7,
         **kwargs
     ) -> str:
-        """Get completion from Google Gemini."""
+        """Get completion from Google Gemini with rate limiting."""
+        import asyncio
+        import random
         
         contents = []
         if messages:
@@ -289,18 +291,42 @@ class GeminiClient(BaseLLMClient):
         if system:
             payload["systemInstruction"] = {"parts": [{"text": system}]}
         
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.post(
-                    f"{self.base_url}:generateContent?key={self.api_key}",
-                    json=payload
-                )
-                response.raise_for_status()
-                data = response.json()
-                return data["candidates"][0]["content"]["parts"][0]["text"]
-        except Exception as e:
-            logger.error(f"Gemini API error: {str(e)}")
-            raise
+        # Retry with exponential backoff for rate limiting
+        max_retries = 5
+        base_delay = 2
+        
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    response = await client.post(
+                        f"{self.base_url}:generateContent?key={self.api_key}",
+                        json=payload
+                    )
+                    
+                    # Handle rate limiting
+                    if response.status_code == 429:
+                        delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                        logger.warning(f"Gemini rate limit hit, retrying in {delay:.1f}s (attempt {attempt + 1}/{max_retries})")
+                        await asyncio.sleep(delay)
+                        continue
+                    
+                    response.raise_for_status()
+                    data = response.json()
+                    return data["candidates"][0]["content"]["parts"][0]["text"]
+                    
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429 and attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                    logger.warning(f"Gemini rate limit hit, retrying in {delay:.1f}s (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(delay)
+                    continue
+                logger.error(f"Gemini API error: {str(e)}")
+                raise
+            except Exception as e:
+                logger.error(f"Gemini API error: {str(e)}")
+                raise
+        
+        raise Exception("Max retries exceeded for Gemini API rate limiting")
 
 
 class KimiClient(BaseLLMClient):

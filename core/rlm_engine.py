@@ -105,10 +105,11 @@ class RLMEngine:
         self,
         root_llm_client: Any,
         sub_llm_client: Any,
-        max_iterations: int = 50,
+        max_iterations: int = 10,
         max_output_tokens_per_iteration: int = 8000,
         max_repl_output_chars: int = 2000,
         sub_llm_max_chars: int = 500000,
+        min_delay_between_calls: float = 0.5,
     ):
         """
         Initialize the RLM Engine.
@@ -116,10 +117,11 @@ class RLMEngine:
         Args:
             root_llm_client: LLM client for the root model (orchestrator)
             sub_llm_client: LLM client for sub-LM calls (can be same as root)
-            max_iterations: Maximum number of RLM iterations
+            max_iterations: Maximum number of RLM iterations (default: 10)
             max_output_tokens_per_iteration: Max tokens per root LLM call
             max_repl_output_chars: Max characters of REPL output to show
             sub_llm_max_chars: Max characters for sub-LM prompts
+            min_delay_between_calls: Minimum delay between API calls in seconds
         """
         self.root_llm_client = root_llm_client
         self.sub_llm_client = sub_llm_client
@@ -127,6 +129,7 @@ class RLMEngine:
         self.max_output_tokens_per_iteration = max_output_tokens_per_iteration
         self.max_repl_output_chars = max_repl_output_chars
         self.sub_llm_max_chars = sub_llm_max_chars
+        self.min_delay_between_calls = min_delay_between_calls
         
         # Create sub-LM invoker
         self.sub_lm_invoker = SubLMInvoker(sub_llm_client, max_chars=sub_llm_max_chars)
@@ -383,6 +386,11 @@ class RLMEngine:
             state.iteration = iteration
             logger.info(f"=== RLM Iteration {iteration + 1} ===")
             
+            # Rate limiting: add delay between iterations to avoid hitting API limits
+            if iteration > 0 and self.min_delay_between_calls > 0:
+                import asyncio
+                await asyncio.sleep(self.min_delay_between_calls)
+            
             # Get response from root LLM
             try:
                 response = await self.root_llm_client.complete(
@@ -431,10 +439,25 @@ class RLMEngine:
                         "variable_name": final_content
                     }
                 else:
+                    # Variable not found - this is a critical error that can cause infinite loops
                     error_msg = f"Variable '{final_content}' not found in REPL environment"
                     logger.error(error_msg)
+                    
+                    # If we've tried too many times with missing variables, exit gracefully
+                    if iteration >= self.max_iterations - 2:
+                        logger.warning(f"Too many attempts with missing variable. Returning error.")
+                        return {
+                            "success": False,
+                            "error": f"Variable '{final_content}' was referenced in FINAL_VAR() but was never created in the REPL. "
+                                   f"Make sure to assign your answer to a variable before calling FINAL_VAR().",
+                            "iterations": iteration + 1,
+                            "sub_lm_calls": self.sub_lm_invoker.call_count,
+                            "history": history
+                        }
+                    
                     history.append({"role": "assistant", "content": response})
-                    history.append({"role": "user", "content": f"Error: {error_msg}. Please check the variable name and try again."})
+                    history.append({"role": "user", "content": f"Error: {error_msg}. You must first create the variable '{final_content}' in the REPL before using FINAL_VAR({final_content}). "
+                                                               f"For example:\n```repl\n{final_content} = 'your answer here'\n```\nThen use FINAL_VAR({final_content})"})
                     continue
             
             # Extract and execute code blocks
@@ -560,6 +583,14 @@ In the next step, we can return FINAL_VAR(final_answer).
 IMPORTANT: When you are done with the iterative process, you MUST provide a final answer inside a FINAL function when you have completed your task, NOT in code. Do not use these tags unless you have completed your task. You have two options:
 1. Use FINAL(your final answer here) to provide the answer directly
 2. Use FINAL_VAR(variable_name) to return a variable you have created in the REPL environment as your final output
+
+CRITICAL: If using FINAL_VAR(variable_name), you MUST first create that variable in the REPL before calling FINAL_VAR. For example:
+```repl
+final_answer = 'This is my answer based on the analysis...'
+```
+Then: FINAL_VAR(final_answer)
+
+If you reference a variable in FINAL_VAR that doesn't exist, the system will error.
 
 Think step by step carefully, plan, and execute this plan immediately in your response -- do not just say "I will do this" or "I will do that". Output to the REPL environment and recursive LLMs as much as possible. Remember to explicitly answer the original query in your final answer."""
         
