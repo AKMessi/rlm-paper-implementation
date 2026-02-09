@@ -33,6 +33,10 @@ from core.rlm_engine import RLMEngine, RLMEngineNoSubCalls
 from core.llm_client import LLMClientFactory
 from core.document_processor import DocumentProcessor, Document
 
+# Set up logging
+import logging
+logger = logging.getLogger(__name__)
+
 # Configuration
 UPLOAD_DIR = Path(__file__).parent.parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -52,6 +56,16 @@ class QueryRequest(BaseModel):
     # User-provided API keys
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
+    google_api_key: Optional[str] = None
+    kimi_api_key: Optional[str] = None
+    groq_api_key: Optional[str] = None
+    together_api_key: Optional[str] = None
+    mistral_api_key: Optional[str] = None
+    cohere_api_key: Optional[str] = None
+    deepseek_api_key: Optional[str] = None
+    perplexity_api_key: Optional[str] = None
+    azure_api_key: Optional[str] = None
+    # Provider and model selection
     root_provider: str = "openai"
     sub_provider: str = "openai"
     root_model: str = "gpt-4o"
