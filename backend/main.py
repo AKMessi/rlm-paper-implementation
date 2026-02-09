@@ -80,19 +80,22 @@ class DocumentInfo(BaseModel):
 
 class APIKeyRequest(BaseModel):
     session_id: str
+    # All supported API keys
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
+    google_api_key: Optional[str] = None
+    kimi_api_key: Optional[str] = None  # Moonshot AI
     groq_api_key: Optional[str] = None
     together_api_key: Optional[str] = None
-    google_api_key: Optional[str] = None
     mistral_api_key: Optional[str] = None
     cohere_api_key: Optional[str] = None
     deepseek_api_key: Optional[str] = None
+    perplexity_api_key: Optional[str] = None
     azure_api_key: Optional[str] = None
-    provider_type: Optional[str] = None
+    # Provider and model selection
     root_provider: str = "openai"
     sub_provider: str = "openai"
-    root_model: str = "gpt-4o"
+    root_model: str = "gpt-4o-mini"
     sub_model: str = "gpt-4o-mini"
 
 
@@ -493,28 +496,33 @@ async def query_documents(request: QueryRequest):
     
     # Helper to get API key for a provider
     def get_key_for_provider(provider):
-        if provider == "openai":
-            return request.openai_api_key or api_keys.get("openai_api_key") or os.getenv("OPENAI_API_KEY")
-        elif provider == "anthropic":
-            return request.anthropic_api_key or api_keys.get("anthropic_api_key") or os.getenv("ANTHROPIC_API_KEY")
-        elif provider == "groq":
-            return api_keys.get("groq_api_key") or os.getenv("GROQ_API_KEY")
-        elif provider == "together":
-            return api_keys.get("together_api_key") or os.getenv("TOGETHER_API_KEY")
-        elif provider in ["google", "gemini"]:
-            return api_keys.get("google_api_key") or os.getenv("GOOGLE_API_KEY")
-        elif provider == "mistral":
-            return api_keys.get("mistral_api_key") or os.getenv("MISTRAL_API_KEY")
-        elif provider == "cohere":
-            return api_keys.get("cohere_api_key") or os.getenv("COHERE_API_KEY")
-        elif provider == "deepseek":
-            return api_keys.get("deepseek_api_key") or os.getenv("DEEPSEEK_API_KEY")
-        elif provider == "azure":
-            return api_keys.get("azure_api_key") or os.getenv("AZURE_OPENAI_KEY")
+        provider = provider.lower()
+        
+        # Map provider names to their API key sources
+        key_mapping = {
+            "openai": (request.openai_api_key, "openai_api_key", "OPENAI_API_KEY"),
+            "anthropic": (request.anthropic_api_key, "anthropic_api_key", "ANTHROPIC_API_KEY"),
+            "google": (request.google_api_key, "google_api_key", "GOOGLE_API_KEY"),
+            "gemini": (request.google_api_key, "google_api_key", "GOOGLE_API_KEY"),
+            "kimi": (request.kimi_api_key, "kimi_api_key", "KIMI_API_KEY"),
+            "moonshot": (request.kimi_api_key, "kimi_api_key", "MOONSHOT_API_KEY"),
+            "groq": (request.groq_api_key, "groq_api_key", "GROQ_API_KEY"),
+            "together": (request.together_api_key, "together_api_key", "TOGETHER_API_KEY"),
+            "mistral": (request.mistral_api_key, "mistral_api_key", "MISTRAL_API_KEY"),
+            "cohere": (request.cohere_api_key, "cohere_api_key", "COHERE_API_KEY"),
+            "deepseek": (request.deepseek_api_key, "deepseek_api_key", "DEEPSEEK_API_KEY"),
+            "perplexity": (request.perplexity_api_key, "perplexity_api_key", "PERPLEXITY_API_KEY"),
+            "azure": (request.azure_api_key, "azure_api_key", "AZURE_OPENAI_KEY"),
+        }
+        
+        if provider in key_mapping:
+            req_key, session_key, env_key = key_mapping[provider]
+            return req_key or api_keys.get(session_key) or os.getenv(env_key)
         elif provider == "ollama":
             return "ollama"
         elif provider == "mock":
             return "mock"
+        
         return None
     
     root_key = get_key_for_provider(root_provider)
