@@ -5,11 +5,23 @@ Recursive Language Model (RLM) Engine
 This module implements the core RLM scaffold as described in the paper:
 "Recursive Language Models" by Zhang et al. (2026)
 
+Algorithm 1 from the paper:
+1. state ← InitREPL(prompt=P)
+2. state ← AddFunction(state, sub_RLM M)
+3. hist ← [Metadata(state)]
+4. while True:
+5.   code ← LLM_M(hist)
+6.   (state, stdout) ← REPL(state, code)
+7.   hist ← hist ∥ code ∥ Metadata(stdout)
+8.   if state[Final] is set:
+9.     return state[Final]
+
 Key components:
 - REPL environment that holds the prompt as a variable
 - Symbolic recursion via code execution
 - Programmatic sub-LM calls
 - Iterative refinement through metadata feedback
+- Completion-style API (not chat), LLM generates only code
 """
 
 import re
@@ -22,6 +34,7 @@ from contextlib import redirect_stdout, redirect_stderr
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import logging
+import time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -59,6 +72,7 @@ class SubLMInvoker:
         self.llm_client = llm_client
         self.max_chars = max_chars
         self.call_count = 0
+        self.delay_between_calls = 0.1  # Small delay to avoid rate limits
         
     async def __call__(self, prompt: str, **kwargs) -> str:
         """
@@ -81,8 +95,12 @@ class SubLMInvoker:
             logger.warning(f"[Sub-LM Call #{call_id}] Truncating prompt from {len(prompt)} to {self.max_chars} chars")
             prompt = prompt[:self.max_chars] + "\n...[truncated]"
         
+        # Rate limiting delay
+        if self.delay_between_calls > 0:
+            await asyncio.sleep(self.delay_between_calls)
+        
         try:
-            response = await self.llm_client.complete(prompt, **kwargs)
+            response = await self.llm_client.complete(prompt=prompt, **kwargs)
             logger.info(f"[Sub-LM Call #{call_id}] Response length: {len(response)} chars")
             return response
         except Exception as e:
@@ -92,22 +110,23 @@ class SubLMInvoker:
 
 class RLMEngine:
     """
-    Recursive Language Model Engine.
+    Recursive Language Model Engine - TRUE Implementation of Algorithm 1.
     
     Implements the RLM scaffold that:
     1. Loads the prompt as a variable in a REPL environment
-    2. Allows the LLM to write code to examine and decompose the prompt
+    2. LLM generates ONLY code (not conversational text)
     3. Supports recursive sub-LM calls via llm_query function
-    4. Iterates until a final answer is produced
+    4. Iterates until Final variable is set in REPL state
+    5. History contains: code + stdout metadata (compact)
     """
     
     def __init__(
         self,
         root_llm_client: Any,
         sub_llm_client: Any,
-        max_iterations: int = 10,
+        max_iterations: int = 50,
         max_output_tokens_per_iteration: int = 8000,
-        max_repl_output_chars: int = 2000,
+        max_stdout_metadata_chars: int = 500,  # Paper: constant-size metadata
         sub_llm_max_chars: int = 500000,
         min_delay_between_calls: float = 0.5,
     ):
@@ -117,17 +136,17 @@ class RLMEngine:
         Args:
             root_llm_client: LLM client for the root model (orchestrator)
             sub_llm_client: LLM client for sub-LM calls (can be same as root)
-            max_iterations: Maximum number of RLM iterations (default: 10)
+            max_iterations: Maximum number of RLM iterations
             max_output_tokens_per_iteration: Max tokens per root LLM call
-            max_repl_output_chars: Max characters of REPL output to show
+            max_stdout_metadata_chars: Max chars of stdout metadata to include
             sub_llm_max_chars: Max characters for sub-LM prompts
-            min_delay_between_calls: Minimum delay between API calls in seconds
+            min_delay_between_calls: Minimum delay between API calls
         """
         self.root_llm_client = root_llm_client
         self.sub_llm_client = sub_llm_client
         self.max_iterations = max_iterations
         self.max_output_tokens_per_iteration = max_output_tokens_per_iteration
-        self.max_repl_output_chars = max_repl_output_chars
+        self.max_stdout_metadata_chars = max_stdout_metadata_chars
         self.sub_llm_max_chars = sub_llm_max_chars
         self.min_delay_between_calls = min_delay_between_calls
         
@@ -151,7 +170,7 @@ class RLMEngine:
         """
         state = REPLState()
         state.set_variable("context", context)
-        state.set_variable("Final", None)
+        # Note: We don't pre-set Final - it's set by the LLM when done
         
         # Create environment with safe builtins
         env = {
@@ -225,6 +244,7 @@ class RLMEngine:
     def _get_context_metadata(self, context: Any) -> Dict[str, Any]:
         """
         Extract metadata about the context for the system prompt.
+        This is the "Metadata(state)" from Algorithm 1.
         
         Args:
             context: The context variable
@@ -266,14 +286,29 @@ class RLMEngine:
                 "num_chunks": 1,
             }
     
-    def _truncate_output(self, output: str, max_chars: int = None) -> str:
-        """Truncate output to fit within context window constraints."""
-        max_chars = max_chars or self.max_repl_output_chars
-        if len(output) <= max_chars:
-            return output
+    def _format_metadata(self, metadata: Dict[str, Any]) -> str:
+        """Format metadata as a string for the history."""
+        return f"""[Context Metadata]
+Type: {metadata.get('context_type', 'unknown')}
+Total length: {metadata.get('context_total_length', 0)} chars
+Number of chunks: {metadata.get('num_chunks', 1)}
+Chunk lengths: {metadata.get('context_lengths', [])[:5]}{'...' if len(metadata.get('context_lengths', [])) > 5 else ''}
+[/Context Metadata]"""
+    
+    def _format_stdout_metadata(self, stdout: str) -> str:
+        """
+        Create constant-size metadata about stdout for history.
+        This is key to Algorithm 1 - we don't include full stdout.
+        """
+        if not stdout:
+            return "[stdout: empty]"
         
-        half = max_chars // 2
-        return output[:half] + f"\n...[truncated {len(output) - max_chars} chars]...\n" + output[-half:]
+        length = len(stdout)
+        if length <= self.max_stdout_metadata_chars:
+            return f"[stdout: {length} chars]\n{stdout}\n[/stdout]"
+        else:
+            half = self.max_stdout_metadata_chars // 2
+            return f"[stdout: {length} chars total, showing {self.max_stdout_metadata_chars}]\n{stdout[:half]}\n...[truncated {length - self.max_stdout_metadata_chars} chars]...\n{stdout[-half:]}\n[/stdout]"
     
     def _execute_code(self, code: str, env: Dict[str, Any]) -> Tuple[str, bool]:
         """
@@ -301,46 +336,77 @@ class RLMEngine:
             logger.error(error_msg)
             return error_msg, False
     
-    def _extract_final_answer(self, text: str) -> Tuple[Optional[str], Optional[str]]:
+    def _build_system_prompt(self, metadata: Dict[str, Any], query: str) -> str:
         """
-        Extract final answer from text using FINAL() or FINAL_VAR() tags.
-        
-        Args:
-            text: The text to parse
-            
-        Returns:
-            Tuple of (answer_type, answer_content) or (None, None)
+        Build the system prompt for the root LLM.
+        The LLM is instructed to generate ONLY code, not conversational text.
         """
-        # Pattern for FINAL(answer)
-        final_pattern = r'FINAL\((.*?)\)(?!\))'
-        match = re.search(final_pattern, text, re.DOTALL)
-        if match:
-            return "direct", match.group(1).strip()
-        
-        # Pattern for FINAL_VAR(variable_name)
-        final_var_pattern = r'FINAL_VAR\((\w+)\)'
-        match = re.search(final_var_pattern, text)
-        if match:
-            return "variable", match.group(1).strip()
-        
-        return None, None
-    
-    def _extract_code_blocks(self, text: str) -> List[str]:
-        """Extract code blocks from the LLM response."""
-        # Match ```repl or ```python code blocks
-        patterns = [
-            r'```repl\s*\n(.*?)\n```',
-            r'```python\s*\n(.*?)\n```',
-            r'```\s*\n(.*?)\n```',
-        ]
-        
-        codes = []
-        for pattern in patterns:
-            matches = re.findall(pattern, text, re.DOTALL)
-            codes.extend(matches)
-        
-        return codes
-    
+        return f"""You are a Recursive Language Model (RLM). Your task is to answer a query by writing Python code that manipulates a large context variable.
+
+CONTEXT INFORMATION:
+- Type: {metadata['context_type']}
+- Total length: {metadata['context_total_length']} characters
+- Number of chunks: {metadata['num_chunks']}
+- Chunk lengths: {metadata['context_lengths'][:10]}{'...' if len(metadata['context_lengths']) > 10 else ''}
+
+AVAILABLE IN THE REPL ENVIRONMENT:
+1. `context` - The main context variable containing the data you need to analyze
+2. `llm_query(prompt)` - A function to query a sub-LM (can handle ~500K chars)
+3. `print()` - To output information
+4. Any variables you create will persist across iterations
+
+USER QUERY: {query}
+
+YOUR TASK:
+Write Python code to analyze the context and answer the query. You can:
+- Examine the context (e.g., `print(len(context))`, `print(context[:1000])`)
+- Break it into chunks and process iteratively
+- Use `llm_query()` to delegate analysis of chunks to sub-LMs
+- Store intermediate results in variables
+- Build up your final answer
+
+IMPORTANT RULES:
+1. Generate ONLY executable Python code wrapped in ```python blocks
+2. Do NOT generate conversational text or explanations
+3. When you have completed your analysis and have a final answer, assign it to the variable `Final`
+4. Example: `Final = "The answer is 42 based on the analysis..."`
+5. Once `Final` is set, the system will return it as the answer
+6. You can iterate multiple times - the REPL state persists
+7. Use print() to see outputs (they will be shown to you in the next iteration)
+
+EXAMPLE WORKFLOW:
+```python
+# First, explore the context
+print(f"Context type: {{type(context)}}")
+print(f"Context length: {{len(context)}}")
+```
+
+```python
+# Then, chunk and analyze
+chunk_size = 100000
+answers = []
+for i in range(0, len(context), chunk_size):
+    chunk = context[i:i+chunk_size]
+    answer = llm_query(f"Analyze this chunk: {{chunk[:5000]}}...")
+    answers.append(answer)
+    print(f"Chunk {{i//chunk_size}} analyzed")
+```
+
+```python
+# Finally, aggregate and set Final
+Final = llm_query(f"Based on these analyses: {{answers}}, answer the original query.")
+```
+
+Remember: Only output code in ```python blocks. Do not write explanations outside code blocks."""
+
+    def _build_initial_history(self, metadata: Dict[str, Any], query: str) -> str:
+        """Build the initial history string with metadata."""
+        return f"""Query: {query}
+
+{self._format_metadata(metadata)}
+
+Begin by exploring the context and developing a strategy."""
+
     async def run(
         self, 
         query: str, 
@@ -350,6 +416,7 @@ class RLMEngine:
     ) -> Dict[str, Any]:
         """
         Run the RLM scaffold on a query with the given context.
+        Implements Algorithm 1 from the paper exactly.
         
         Args:
             query: The user's query/question
@@ -360,43 +427,42 @@ class RLMEngine:
         Returns:
             Dictionary with results and metadata
         """
-        # Initialize REPL environment
+        start_time = time.time()
+        
+        # Initialize REPL environment (Algorithm 1, line 1)
         env, state = self._create_repl_environment(context, context_type)
-        self._inject_llm_query(env)
+        self._inject_llm_query(env)  # Algorithm 1, line 2
         
         # Get context metadata
         metadata = self._get_context_metadata(context)
         
-        # Build conversation history
-        history = []
-        
-        # Use provided system prompt or default
+        # Build system prompt and initial history (Algorithm 1, line 3)
         if system_prompt is None:
-            system_prompt = self._get_default_system_prompt(**metadata)
+            system_prompt = self._build_system_prompt(metadata, query)
         
-        # Initial user message
-        initial_message = self._build_initial_message(query, metadata)
-        history.append({"role": "user", "content": initial_message})
+        # History is a text string, not chat messages (key difference from chat API)
+        history = self._build_initial_history(metadata, query)
         
-        logger.info(f"Starting RLM loop. Context: {metadata['context_total_length']} chars, "
-                   f"{metadata['num_chunks']} chunks")
+        logger.info(f"Starting RLM loop (Algorithm 1). Context: {metadata['context_total_length']} chars, {metadata['num_chunks']} chunks")
         
-        # RLM Loop (Algorithm 1 from paper)
+        # RLM Loop (Algorithm 1, lines 4-9)
         for iteration in range(self.max_iterations):
             state.iteration = iteration
             logger.info(f"=== RLM Iteration {iteration + 1} ===")
             
-            # Rate limiting: add delay between iterations to avoid hitting API limits
+            # Rate limiting
             if iteration > 0 and self.min_delay_between_calls > 0:
-                import asyncio
                 await asyncio.sleep(self.min_delay_between_calls)
             
-            # Get response from root LLM
+            # Algorithm 1, line 5: code ← LLM_M(hist)
+            # LLM generates ONLY code based on history (completion-style)
             try:
+                full_prompt = f"{system_prompt}\n\n{history}\n\nGenerate Python code to continue:"
+                
                 response = await self.root_llm_client.complete(
-                    messages=history,
-                    system=system_prompt,
-                    max_tokens=self.max_output_tokens_per_iteration
+                    prompt=full_prompt,
+                    max_tokens=self.max_output_tokens_per_iteration,
+                    temperature=0.7
                 )
             except Exception as e:
                 logger.error(f"Root LLM error: {str(e)}")
@@ -404,201 +470,83 @@ class RLMEngine:
                     "success": False,
                     "error": f"Root LLM error: {str(e)}",
                     "iterations": iteration,
-                    "history": history
+                    "history": history,
+                    "sub_lm_calls": self.sub_lm_invoker.call_count,
                 }
             
-            # Check for final answer
-            final_type, final_content = self._extract_final_answer(response)
+            # Extract code from response
+            code_blocks = self._extract_code_blocks(response)
             
-            if final_type == "direct":
-                logger.info(f"Final answer received (direct) at iteration {iteration + 1}")
+            if not code_blocks:
+                # LLM didn't generate code - this is an error in our setup
+                logger.warning(f"No code blocks found in iteration {iteration + 1}")
+                # Add to history and continue, hoping it will generate code next time
+                history += f"\n\n[Iteration {iteration + 1}]\n{response}\n\n[No executable code found. Please generate Python code in ```python blocks.]"
+                continue
+            
+            # Execute all code blocks (Algorithm 1, line 6)
+            all_outputs = []
+            all_code = []
+            for code in code_blocks:
+                output, success = self._execute_code(code, env)
+                all_outputs.append(output)
+                all_code.append(code)
+            
+            combined_output = "\n".join(all_outputs)
+            combined_code = "\n\n".join(all_code)
+            
+            # Algorithm 1, line 7: hist ← hist ∥ code ∥ Metadata(stdout)
+            # Update history with code and stdout metadata (constant-size)
+            stdout_metadata = self._format_stdout_metadata(combined_output)
+            history += f"\n\n[Iteration {iteration + 1}]\n```python\n{combined_code}\n```\n\n{stdout_metadata}"
+            
+            # Algorithm 1, lines 8-9: if state[Final] is set: return state[Final]
+            if state.has_variable("Final"):
+                final_value = state.get_variable("Final")
+                # Convert to string if needed
+                if not isinstance(final_value, str):
+                    final_value = str(final_value)
+                
+                processing_time = time.time() - start_time
+                logger.info(f"Final answer received at iteration {iteration + 1}")
+                logger.info(f"Processing time: {processing_time:.2f}s")
+                
                 return {
                     "success": True,
-                    "answer": final_content,
+                    "answer": final_value,
                     "iterations": iteration + 1,
                     "sub_lm_calls": self.sub_lm_invoker.call_count,
                     "history": history,
-                    "final_type": "direct"
+                    "processing_time_seconds": processing_time,
                 }
-            
-            elif final_type == "variable":
-                # Retrieve variable from REPL environment
-                if final_content in env:
-                    var_value = env[final_content]
-                    # Convert to string if needed
-                    if not isinstance(var_value, str):
-                        var_value = str(var_value)
-                    logger.info(f"Final answer received (variable: {final_content}) at iteration {iteration + 1}")
-                    return {
-                        "success": True,
-                        "answer": var_value,
-                        "iterations": iteration + 1,
-                        "sub_lm_calls": self.sub_lm_invoker.call_count,
-                        "history": history,
-                        "final_type": "variable",
-                        "variable_name": final_content
-                    }
-                else:
-                    # Variable not found - this is a critical error that can cause infinite loops
-                    error_msg = f"Variable '{final_content}' not found in REPL environment"
-                    logger.error(error_msg)
-                    
-                    # If we've tried too many times with missing variables, exit gracefully
-                    if iteration >= self.max_iterations - 2:
-                        logger.warning(f"Too many attempts with missing variable. Returning error.")
-                        return {
-                            "success": False,
-                            "error": f"Variable '{final_content}' was referenced in FINAL_VAR() but was never created in the REPL. "
-                                   f"Make sure to assign your answer to a variable before calling FINAL_VAR().",
-                            "iterations": iteration + 1,
-                            "sub_lm_calls": self.sub_lm_invoker.call_count,
-                            "history": history
-                        }
-                    
-                    history.append({"role": "assistant", "content": response})
-                    history.append({"role": "user", "content": f"Error: {error_msg}. You must first create the variable '{final_content}' in the REPL before using FINAL_VAR({final_content}). "
-                                                               f"For example:\n```repl\n{final_content} = 'your answer here'\n```\nThen use FINAL_VAR({final_content})"})
-                    continue
-            
-            # Extract and execute code blocks
-            code_blocks = self._extract_code_blocks(response)
-            
-            if code_blocks:
-                # Execute all code blocks
-                all_outputs = []
-                for code in code_blocks:
-                    output, success = self._execute_code(code, env)
-                    all_outputs.append(output)
-                
-                combined_output = "\n".join(all_outputs)
-                truncated_output = self._truncate_output(combined_output)
-                
-                # Update history
-                history.append({"role": "assistant", "content": response})
-                history.append({
-                    "role": "user", 
-                    "content": f"REPL Output:\n```\n{truncated_output}\n```"
-                })
-            else:
-                # No code to execute, just continue conversation
-                history.append({"role": "assistant", "content": response})
-                history.append({
-                    "role": "user",
-                    "content": "Please provide code to execute in the REPL environment using ```repl blocks, or provide a FINAL() answer when complete."
-                })
         
-        # Max iterations reached
-        logger.warning(f"Max iterations ({self.max_iterations}) reached without final answer")
+        # Max iterations reached without Final being set
+        logger.warning(f"Max iterations ({self.max_iterations}) reached without Final being set")
         return {
             "success": False,
-            "error": f"Max iterations ({self.max_iterations}) reached",
+            "error": f"Max iterations ({self.max_iterations}) reached without Final being set. "
+                   f"The LLM did not assign a value to the 'Final' variable.",
             "iterations": self.max_iterations,
             "sub_lm_calls": self.sub_lm_invoker.call_count,
-            "history": history
+            "history": history,
+            "processing_time_seconds": time.time() - start_time,
         }
     
-    def _get_default_system_prompt(
-        self,
-        context_type: str,
-        context_total_length: int,
-        context_lengths: List[int],
-        num_chunks: int,
-        **kwargs
-    ) -> str:
-        """
-        Generate the default RLM system prompt as described in the paper.
-        Based on Appendix C.1 from the paper.
-        """
-        prompt = f"""You are tasked with answering a query with associated context. You can access, transform, and analyze this context interactively in a REPL environment that can recursively query sub-LLMs, which you are strongly encouraged to use as much as possible. You will be queried iteratively until you provide a final answer.
-
-Your context is a {context_type} with {context_total_length} total characters, and is broken up into chunks of char lengths: {context_lengths[:10]}{'...' if len(context_lengths) > 10 else ''}.
-
-The REPL environment is initialized with:
-1. A 'context' variable that contains extremely important information about your query. You should check the content of the 'context' variable to understand what you are working with. Make sure you look through it sufficiently as you answer your query.
-2. A 'llm_query' function that allows you to query an LLM (that can handle around 500K chars) inside your REPL environment.
-3. The ability to use 'print()' statements to view the output of your REPL code and continue your reasoning.
-
-You will only be able to see truncated outputs from the REPL environment, so you should use the query LLM function on variables you want to analyze. You will find this function especially useful when you have to analyze the semantics of the context.
-Use these variables as buffers to build up your final answer.
-
-Make sure to explicitly look through the entire context in REPL before answering your query. An example strategy is to first look at the context and figure out a chunking strategy, then break up the context into smart chunks, and query an LLM per chunk with a particular question and save the answers to a buffer, then query an LLM with all the buffers to produce your final answer.
-
-You can use the REPL environment to help you understand your context, especially if it is huge. Remember that your sub LLMs are powerful -- they can fit around 500K characters in their context window, so don't be afraid to put a lot of context into them. For example, a viable strategy is to feed 10 documents per sub-LLM query. Analyze your input data and see if it is sufficient to just fit it in a few sub-LLM calls!
-
-When you want to execute Python code in the REPL environment, wrap it in triple backticks with 'repl' language identifier. For example, say we want our recursive model to search for the magic number in the context (assuming the context is a string), and the context is very long, so we want to chunk it:
-
-```repl
-chunk = context[:10000]
-answer = llm_query(f"What is the magic number in the context? Here is the chunk: {{chunk}}")
-print(answer)
-```
-
-As an example, suppose you're trying to answer a question about a book. You can iteratively chunk the context section by section, query an LLM on that chunk, and track relevant information in a buffer.
-
-```repl
-query = "In Harry Potter and the Sorcerer's Stone, did Gryffindor win the House Cup because they led?"
-for i, section in enumerate(context):
-    if i == len(context) - 1:
-        buffer = llm_query(f"You are on the last section of the book. So far you know that: {{buffers}}. Gather from this last section to answer {{query}}. Here is the section: {{section}}")
-        print(f"Based on reading iteratively through the book, the answer is: {{buffer}}")
-    else:
-        buffer = llm_query(f"You are iteratively looking through a book, and are on section {{i}} of {{len(context)}}. Gather information to help answer {{query}}. Here is the section: {{section}}")
-        print(f"After section {{i}} of {{len(context)}}, you have tracked: {{buffer}}")
-```
-
-As another example, when the context isn't that long (e.g. <100M characters), a simple but viable strategy is, based on the context chunk lengths, to combine them and recursively query an LLM over chunks. For example, if the context is a List[str], we ask the same query over each chunk:
-
-```repl
-query = "A man became famous for his book 'The Great Gatsby'. How many jobs did he have?"
-# Suppose our context is ~1M chars, and we want each sub-LLM query to be ~0.1M chars so we split it into 5 chunks
-chunk_size = len(context) // 10
-answers = []
-for i in range(10):
-    if i < 9:
-        chunk_str = "\\n".join(context[i*chunk_size:(i+1)*chunk_size])
-    else:
-        chunk_str = "\\n".join(context[i*chunk_size:])
-    answer = llm_query(f"Try to answer the following query: {{query}}. Here are the documents:\\n{{chunk_str}}. Only answer if you are confident in your answer based on the evidence.")
-    answers.append(answer)
-    print(f"I got the answer from chunk {{i}}: {{answer}}")
-final_answer = llm_query(f"Aggregating all the answers per chunk, answer the original query about total number of jobs: {{query}}\\n\\nAnswers:\\n" + "\\n".join(answers))
-```
-
-As a final example, after analyzing the context and realizing its separated by Markdown headers, we can maintain state through buffers by chunking the context by headers, and iteratively querying an LLM over it:
-
-```repl
-# After finding out the context is separated by Markdown headers, we can chunk, summarize, and answer
-import re
-sections = re.split(r'### (.+)', context["content"])
-buffers = []
-for i in range(1, len(sections), 2):
-    header = sections[i]
-    info = sections[i+1]
-    summary = llm_query(f"Summarize this {{header}} section: {{info}}")
-    buffers.append(f"{{header}}: {{summary}}")
-final_answer = llm_query(f"Based on these summaries, answer the original query: {{query}}\\n\\nSummaries:\\n" + "\\n".join(buffers))
-```
-In the next step, we can return FINAL_VAR(final_answer).
-
-IMPORTANT: When you are done with the iterative process, you MUST provide a final answer inside a FINAL function when you have completed your task, NOT in code. Do not use these tags unless you have completed your task. You have two options:
-1. Use FINAL(your final answer here) to provide the answer directly
-2. Use FINAL_VAR(variable_name) to return a variable you have created in the REPL environment as your final output
-
-CRITICAL: If using FINAL_VAR(variable_name), you MUST first create that variable in the REPL before calling FINAL_VAR. For example:
-```repl
-final_answer = 'This is my answer based on the analysis...'
-```
-Then: FINAL_VAR(final_answer)
-
-If you reference a variable in FINAL_VAR that doesn't exist, the system will error.
-
-Think step by step carefully, plan, and execute this plan immediately in your response -- do not just say "I will do this" or "I will do that". Output to the REPL environment and recursive LLMs as much as possible. Remember to explicitly answer the original query in your final answer."""
+    def _extract_code_blocks(self, text: str) -> List[str]:
+        """Extract code blocks from the LLM response."""
+        # Match ```python or ```repl code blocks
+        patterns = [
+            r'```python\s*\n(.*?)\n```',
+            r'```repl\s*\n(.*?)\n```',
+            r'```\s*\n(.*?)\n```',
+        ]
         
-        return prompt
-    
-    def _build_initial_message(self, query: str, metadata: Dict[str, Any]) -> str:
-        """Build the initial user message with the query."""
-        return f"Query: {query}\n\nThe context has been loaded into the REPL environment as the 'context' variable. Begin by examining the context and developing a strategy to answer the query."
+        codes = []
+        for pattern in patterns:
+            matches = re.findall(pattern, text, re.DOTALL)
+            codes.extend(matches)
+        
+        return codes
 
 
 class RLMEngineNoSubCalls(RLMEngine):
@@ -611,59 +559,30 @@ class RLMEngineNoSubCalls(RLMEngine):
         """Override to not inject llm_query function."""
         pass
     
-    def _get_default_system_prompt(self, **metadata) -> str:
+    def _build_system_prompt(self, metadata: Dict[str, Any], query: str) -> str:
         """Generate system prompt without sub-LM call instructions."""
-        prompt = f"""You are tasked with answering a query with associated context. You can access, transform, and analyze this context interactively in a REPL environment, which you are strongly encouraged to use as much as possible. You will be queried iteratively until you provide a final answer.
+        return f"""You are a Recursive Language Model (RLM) without sub-calls. Your task is to answer a query by writing Python code that manipulates a large context variable.
 
-Your context is a {metadata.get('context_type', 'string')} with {metadata.get('context_total_length', 0)} total characters, and is broken up into chunks of char lengths: {metadata.get('context_lengths', [])[:10]}{'...' if len(metadata.get('context_lengths', [])) > 10 else ''}.
+CONTEXT INFORMATION:
+- Type: {metadata['context_type']}
+- Total length: {metadata['context_total_length']} characters
+- Number of chunks: {metadata['num_chunks']}
 
-The REPL environment is initialized with:
-1. A 'context' variable that contains extremely important information about your query. You should check the content of the 'context' variable to understand what you are working with. Make sure you look through it sufficiently as you answer your query.
-2. The ability to use 'print()' statements to view the output of your REPL code and continue your reasoning.
+AVAILABLE IN THE REPL ENVIRONMENT:
+1. `context` - The main context variable containing the data you need to analyze
+2. `print()` - To output information
+3. Any variables you create will persist across iterations
 
-You will only be able to see truncated outputs from the REPL environment to not overflow the context window. Use these variables as buffers to build up your final answer.
+USER QUERY: {query}
 
-Make sure to explicitly look through the entire context in REPL before answering your query. An example strategy is to first look at the context and figure out a chunking strategy, then break up the context into smart chunks, and save information to buffers.
+YOUR TASK:
+Write Python code to analyze the context and answer the query using only the tools available.
 
-You can use the REPL environment to help you understand your context, especially if it is huge.
+IMPORTANT RULES:
+1. Generate ONLY executable Python code wrapped in ```python blocks
+2. Do NOT generate conversational text or explanations
+3. When you have completed your analysis and have a final answer, assign it to the variable `Final`
+4. Example: `Final = "The answer is 42 based on the analysis..."`
+5. Once `Final` is set, the system will return it as the answer
 
-When you want to execute Python code in the REPL environment, wrap it in triple backticks with 'repl' language identifier. For example, say we want to peek at the first 10000 characters of the context:
-
-```repl
-chunk = context[:10000]
-print(f"First 10000 characters of context: {{chunk}}")
-```
-
-As another example, after analyzing the context and realizing we need to search for specific topics, we can use regex to find relevant sections and maintain state through buffers:
-
-```repl
-# After finding out we need to search for "magic" and "number" in the context
-import re
-query_terms = ["magic", "number"]
-relevant_sections = []
-buffers = []
-# Search for sections containing our query terms
-for i, chunk in enumerate(context):
-    chunk_text = str(chunk).lower()
-    if any(term in chunk_text for term in query_terms):
-        relevant_sections.append((i, chunk))
-# Process each relevant section and print findings
-for section_idx, section_content in relevant_sections:
-    print(f"Found relevant section {{section_idx}} containing magic/number references:")
-    print(f"Content: {{section_content[:500]}}...")  # Print first 500 chars
-    buffers.append(f"Section {{section_idx}}: Contains magic/number references")
-print(f"Total relevant sections found: {{len(relevant_sections)}}")
-print("Summary of findings:")
-for buffer in buffers:
-    print(f"- {{buffer}}")
-```
-
-IMPORTANT: When you are done with the iterative process, you MUST provide a final answer inside a FINAL function when you have completed your task, NOT in code. Do not use these tags unless you have completed your task. You have two options:
-1. Use FINAL(your final answer here) to provide the answer directly
-2. Use FINAL_VAR(variable_name) to return a variable you have created in the REPL environment as your final output
-
-Note: If you are ready to provide a final answer, you cannot write anything other than the final answer in the FINAL or FINAL_VAR tags.
-
-Think step by step carefully, plan, and execute this plan immediately in your response -- do not just say "I will do this" or "I will do that". Output to the REPL environment as much as possible. Remember to explicitly answer the original query in your final answer."""
-        
-        return prompt
+Remember: Only output code in ```python blocks. Do not write explanations outside code blocks."""

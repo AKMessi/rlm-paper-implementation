@@ -78,6 +78,7 @@ class QueryResponse(BaseModel):
     iterations: int = 0
     sub_lm_calls: int = 0
     processing_time_seconds: float = 0.0
+    final_type: Optional[str] = None  # For true RLM, this is always "variable"
 
 class SessionInfo(BaseModel):
     session_id: str
@@ -642,14 +643,14 @@ async def query_documents(request: QueryRequest):
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=f"Error initializing LLM clients: {str(e)}")
         
-        # Initialize RLM Engine
+        # Initialize RLM Engine (True RLM Algorithm 1 implementation)
         try:
             if request.use_subcalls:
                 rlm = RLMEngine(
                     root_llm_client=root_client,
                     sub_llm_client=sub_client,
                     max_iterations=request.max_iterations,
-                    max_repl_output_chars=2000,
+                    max_stdout_metadata_chars=500,  # Paper: constant-size metadata
                     sub_llm_max_chars=500000,
                 )
             else:
@@ -657,7 +658,7 @@ async def query_documents(request: QueryRequest):
                     root_llm_client=root_client,
                     sub_llm_client=sub_client,
                     max_iterations=request.max_iterations,
-                    max_repl_output_chars=2000,
+                    max_stdout_metadata_chars=500,
                 )
         except Exception as e:
             logger.error(f"Error creating RLM engine: {str(e)}")

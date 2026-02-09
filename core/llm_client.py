@@ -950,7 +950,7 @@ class OllamaClient(BaseLLMClient):
 
 
 class MockLLMClient(BaseLLMClient):
-    """Mock LLM client for testing."""
+    """Mock LLM client for testing - generates code for true RLM."""
     
     def __init__(self, model: str = "mock-model", **kwargs):
         super().__init__(model, **kwargs)
@@ -965,7 +965,7 @@ class MockLLMClient(BaseLLMClient):
         temperature: float = 0.7,
         **kwargs
     ) -> str:
-        """Return a mock response."""
+        """Return a mock code response for true RLM."""
         self.call_count += 1
         
         prompt_text = prompt or ""
@@ -976,14 +976,17 @@ class MockLLMClient(BaseLLMClient):
         
         prompt_lower = prompt_text.lower()
         
-        if system is None and ("chunk" in prompt_lower or "section" in prompt_lower or "documents" in prompt_lower):
-            return "I found relevant information in this chunk. The key points are: [simulated content analysis mentioning Ada Lovelace and Alan Turing]"
+        # For sub-LM calls (chunk analysis)
+        if "chunk" in prompt_lower or "section" in prompt_lower or "documents" in prompt_lower:
+            return "This chunk discusses important topics including Ada Lovelace and Alan Turing."
         
-        elif "summarize" in prompt_lower:
-            return "Summary: [simulated summary of the provided text]"
+        # For summarization requests
+        if "summarize" in prompt_lower:
+            return "Summary: The text covers computing history."
         
+        # First iterations: explore context
         if self.call_count <= 2:
-            return '''```repl
+            return '''```python
 # Initial exploration of the context
 print("Exploring context...")
 print(f"Type: {type(context)}")
@@ -1000,9 +1003,11 @@ if isinstance(context, list) and len(context) >= 50:
 ```
 '''
         else:
-            return '''Based on my analysis of the document, I found the relevant information in section 50.
-
-FINAL(Section 50 discusses The History of Computing, mentioning Ada Lovelace, Alan Turing, mechanical calculators, and the ENIAC computer.)'''
+            # Final iteration: set the Final variable
+            return '''```python
+# Analysis complete, setting Final answer
+Final = "Section 50 discusses The History of Computing, mentioning Ada Lovelace, Alan Turing, mechanical calculators, and the ENIAC computer."
+```'''
 
 
 class LLMClientFactory:
