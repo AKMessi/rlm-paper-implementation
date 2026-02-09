@@ -146,28 +146,9 @@ def get_or_create_session(session_id: Optional[str] = None) -> tuple[str, Dict[s
 
 @app.get("/")
 async def root():
-    """Root endpoint - returns API info."""
-    return {
-        "name": "RLM - Recursive Language Model",
-        "version": "1.0.0",
-        "description": "Process arbitrarily long documents using recursive LLM retrieval. BYOK (Bring Your Own Key).",
-        "features": [
-            "Recursive Language Model (RLM) processing",
-            "Multi-format document support (PDF, DOCX, TXT, MD, Code)",
-            "User-provided API keys (no cost to deployer)",
-            "10M+ token context handling",
-            "Symbolic recursion via REPL"
-        ],
-        "endpoints": {
-            "upload": "POST /upload",
-            "query": "POST /query",
-            "set_api_keys": "POST /api/keys",
-            "get_models": "GET /api/models",
-            "sessions": "GET /sessions/{session_id}",
-            "health": "GET /health"
-        },
-        "note": "Users must provide their own OpenAI/Anthropic API keys. No keys are stored permanently."
-    }
+    """Root endpoint - redirect to web UI."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/web")
 
 
 @app.get("/health")
