@@ -1054,6 +1054,11 @@
 
                 const data = await response.json();
 
+                if (!response.ok) {
+                    alert('Failed to save API keys: ' + (data.detail || data.message || 'Server error'));
+                    return;
+                }
+
                 if (data.success) {
                     updateKeyStatus(true, data.keys_set);
                     alert('API keys saved successfully!');

@@ -165,9 +165,16 @@ async def set_api_keys(request: APIKeyRequest):
     """
     Store API keys for a session (in memory only).
     Keys are NOT stored permanently - they disappear when session expires.
+    Creates session if it doesn't exist.
     """
+    # Create session if it doesn't exist
     if request.session_id not in sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
+        sessions[request.session_id] = {
+            "created_at": datetime.now().isoformat(),
+            "documents": [],
+            "total_chars": 0,
+            "api_keys": {},
+        }
     
     session = sessions[request.session_id]
     
