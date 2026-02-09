@@ -1,6 +1,18 @@
 # RLM Quick Start Guide
 
-Get your RLM application running in 5 minutes!
+Get your RLM application running in 5 minutes - **with zero API costs to you!**
+
+> 🆓 **BYOK (Bring Your Own Key)**: Users enter their own OpenAI/Anthropic API keys in the UI. You pay nothing!
+
+---
+
+## 💰 How BYOK Works
+
+1. **You deploy** the app (completely free)
+2. **Users enter** their own API keys in the web interface
+3. **Keys are stored** in memory only (never saved to disk)
+4. **Users pay** only for what they use (~$0.10-$0.50 per document)
+5. **You pay** $0.00 - forever!
 
 ---
 
@@ -34,7 +46,7 @@ Open: http://localhost:8000/web
 
 1. Fork this repo to your GitHub
 2. Click the button above
-3. Add your `OPENAI_API_KEY` in dashboard
+3. **No API keys needed** - users bring their own!
 4. Done! 🎉
 
 ### Railway.app
@@ -92,19 +104,24 @@ chmod +x deploy.sh
 
 ---
 
-## 🔑 Required Environment Variables
+## 🔑 Environment Variables (Optional)
 
-Create a `.env` file:
+**No API keys required!** Users enter their own in the UI.
+
+Optional `.env` file for configuration:
 
 ```bash
-# For real LLM usage (required for production)
-OPENAI_API_KEY=sk-your-key-here
-RLM_ROOT_PROVIDER=openai
-RLM_SUB_PROVIDER=openai
+# Server settings
+PORT=8000
+HOST=0.0.0.0
 
-# For testing (no API costs)
-RLM_ROOT_PROVIDER=mock
-RLM_SUB_PROVIDER=mock
+# Optional: Fallback API keys (not recommended)
+# Only use if you want to provide default keys
+# OPENAI_API_KEY=sk-your-key-here
+
+# Optional: Use mock mode for testing
+# RLM_ROOT_PROVIDER=mock
+# RLM_SUB_PROVIDER=mock
 ```
 
 ---
@@ -131,7 +148,8 @@ Then open the web interface and upload a document!
 |-------|----------|
 | Port already in use | Change PORT in .env or stop other services |
 | Module not found | Activate venv: `source venv/bin/activate` |
-| API errors | Check OPENAI_API_KEY is set correctly |
+| API errors | User needs to enter their API key in the UI |
+| "No API keys set" | User must click "Save API Keys" before querying |
 | Upload fails | Ensure `uploads/` directory exists |
 
 ---

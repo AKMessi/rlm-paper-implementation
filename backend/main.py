@@ -7,6 +7,7 @@ Supports:
 - Document upload (PDF, TXT, DOCX, MD, code files)
 - Querying with RLM retrieval
 - Session management
+- User-provided API keys (no cost to deployer)
 """
 
 import os
@@ -48,6 +49,13 @@ class QueryRequest(BaseModel):
     query: str
     use_subcalls: bool = True
     max_iterations: int = 50
+    # User-provided API keys
+    openai_api_key: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+    root_provider: str = "openai"
+    sub_provider: str = "openai"
+    root_model: str = "gpt-4o"
+    sub_model: str = "gpt-4o-mini"
 
 class QueryResponse(BaseModel):
     success: bool
@@ -70,6 +78,23 @@ class DocumentInfo(BaseModel):
     num_chunks: int
     metadata: Dict[str, Any]
 
+class APIKeyRequest(BaseModel):
+    session_id: str
+    openai_api_key: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+    groq_api_key: Optional[str] = None
+    together_api_key: Optional[str] = None
+    google_api_key: Optional[str] = None
+    mistral_api_key: Optional[str] = None
+    cohere_api_key: Optional[str] = None
+    deepseek_api_key: Optional[str] = None
+    azure_api_key: Optional[str] = None
+    provider_type: Optional[str] = None
+    root_provider: str = "openai"
+    sub_provider: str = "openai"
+    root_model: str = "gpt-4o"
+    sub_model: str = "gpt-4o-mini"
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -77,6 +102,7 @@ async def lifespan(app: FastAPI):
     # Startup
     print("=" * 60)
     print("RLM Application Starting")
+    print("User brings their own API keys - no cost to deployer!")
     print("=" * 60)
     print(f"Upload directory: {UPLOAD_DIR}")
     print(f"Chunk size: {doc_processor.chunk_size}")
@@ -88,7 +114,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="RLM - Recursive Language Model",
-    description="Process arbitrarily long documents using recursive LLM retrieval",
+    description="Process arbitrarily long documents using recursive LLM retrieval. Users provide their own API keys.",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -113,6 +139,7 @@ def get_or_create_session(session_id: Optional[str] = None) -> tuple[str, Dict[s
         "created_at": datetime.now().isoformat(),
         "documents": [],
         "total_chars": 0,
+        "api_keys": {},  # Store user API keys per session
     }
     return new_session_id, sessions[new_session_id]
 
@@ -123,20 +150,157 @@ async def root():
     return {
         "name": "RLM - Recursive Language Model",
         "version": "1.0.0",
-        "description": "Process arbitrarily long documents using recursive LLM retrieval",
+        "description": "Process arbitrarily long documents using recursive LLM retrieval. BYOK (Bring Your Own Key).",
+        "features": [
+            "Recursive Language Model (RLM) processing",
+            "Multi-format document support (PDF, DOCX, TXT, MD, Code)",
+            "User-provided API keys (no cost to deployer)",
+            "10M+ token context handling",
+            "Symbolic recursion via REPL"
+        ],
         "endpoints": {
             "upload": "POST /upload",
             "query": "POST /query",
+            "set_api_keys": "POST /api/keys",
+            "get_models": "GET /api/models",
             "sessions": "GET /sessions/{session_id}",
             "health": "GET /health"
-        }
+        },
+        "note": "Users must provide their own OpenAI/Anthropic API keys. No keys are stored permanently."
     }
 
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    return {"status": "healthy", "active_sessions": len(sessions)}
+    return {"status": "healthy", "active_sessions": len(sessions), "byok": True}
+
+
+@app.post("/api/keys")
+async def set_api_keys(request: APIKeyRequest):
+    """
+    Store API keys for a session (in memory only).
+    Keys are NOT stored permanently - they disappear when session expires.
+    """
+    if request.session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session = sessions[request.session_id]
+    
+    # Store all API keys in session (memory only)
+    session["api_keys"] = {
+        "openai_api_key": request.openai_api_key,
+        "anthropic_api_key": request.anthropic_api_key,
+        "groq_api_key": request.groq_api_key,
+        "together_api_key": request.together_api_key,
+        "google_api_key": request.google_api_key,
+        "mistral_api_key": request.mistral_api_key,
+        "cohere_api_key": request.cohere_api_key,
+        "deepseek_api_key": request.deepseek_api_key,
+        "azure_api_key": request.azure_api_key,
+        "root_provider": request.root_provider,
+        "sub_provider": request.sub_provider,
+        "root_model": request.root_model,
+        "sub_model": request.sub_model,
+    }
+    
+    # Helper to mask key
+    def mask_key(key):
+        if key and len(key) > 12:
+            return key[:8] + "..." + key[-4:]
+        return None
+    
+    # Mask keys for response
+    keys_set = {
+        "openai": mask_key(request.openai_api_key),
+        "anthropic": mask_key(request.anthropic_api_key),
+        "groq": mask_key(request.groq_api_key),
+        "together": mask_key(request.together_api_key),
+        "google": mask_key(request.google_api_key),
+        "mistral": mask_key(request.mistral_api_key),
+        "cohere": mask_key(request.cohere_api_key),
+        "deepseek": mask_key(request.deepseek_api_key),
+        "azure": mask_key(request.azure_api_key),
+    }
+    
+    # Filter out None values
+    keys_set = {k: v for k, v in keys_set.items() if v is not None}
+    
+    return {
+        "success": True,
+        "message": "API keys stored in session memory",
+        "keys_set": keys_set,
+        "providers": {
+            "root": request.root_provider,
+            "sub": request.sub_provider,
+        },
+        "models": {
+            "root": request.root_model,
+            "sub": request.sub_model,
+        }
+    }
+
+
+@app.get("/api/keys/{session_id}")
+async def check_api_keys(session_id: str):
+    """Check if API keys are set for a session (returns masked keys only)."""
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session = sessions[session_id]
+    api_keys = session.get("api_keys", {})
+    
+    openai_key = api_keys.get("openai_api_key")
+    anthropic_key = api_keys.get("anthropic_api_key")
+    
+    return {
+        "has_openai": openai_key is not None,
+        "has_anthropic": anthropic_key is not None,
+        "masked_openai": openai_key[:8] + "..." + openai_key[-4:] if openai_key else None,
+        "masked_anthropic": anthropic_key[:8] + "..." + anthropic_key[-4:] if anthropic_key else None,
+        "providers": {
+            "root": api_keys.get("root_provider", "openai"),
+            "sub": api_keys.get("sub_provider", "openai"),
+        },
+        "models": {
+            "root": api_keys.get("root_model", "gpt-4o"),
+            "sub": api_keys.get("sub_model", "gpt-4o-mini"),
+        }
+    }
+
+
+@app.delete("/api/keys/{session_id}")
+async def clear_api_keys(session_id: str):
+    """Clear API keys from session."""
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    sessions[session_id]["api_keys"] = {}
+    return {"success": True, "message": "API keys cleared from session"}
+
+
+@app.get("/api/models")
+async def get_available_models():
+    """Get list of available models and providers."""
+    from core.llm_client import LLMClientFactory
+    
+    provider_info = LLMClientFactory.get_provider_info()
+    
+    return {
+        "providers": list(provider_info.keys()),
+        "providers_detail": provider_info,
+        "recommendations": {
+            "cost_effective": "deepseek-chat or groq-llama-3.1-8b for root + sub",
+            "best_quality": "gpt-4o or claude-3-5-sonnet for root + gpt-4o-mini for sub",
+            "balanced": "groq-llama-3.1-70b for root + groq-llama-3.1-8b for sub",
+            "free_local": "ollama with llama3.1 (completely free!)"
+        },
+        "cost_ranking": {
+            "cheapest": ["mock", "ollama", "deepseek", "groq", "together"],
+            "mid_range": ["google", "mistral", "cohere", "openai (4o-mini)"],
+            "premium": ["openai (4o)", "anthropic", "azure"]
+        }
+    }
 
 
 @app.post("/upload")
@@ -163,6 +327,11 @@ async def upload_document(
         
         if file_size == 0:
             raise HTTPException(status_code=400, detail="Empty file")
+        
+        # Check max file size (50MB)
+        max_size = 50 * 1024 * 1024  # 50MB
+        if file_size > max_size:
+            raise HTTPException(status_code=413, detail=f"File too large. Max size: 50MB")
         
         # Save file
         file_id = str(uuid.uuid4())
@@ -223,6 +392,12 @@ async def upload_multiple_documents(
             
             if len(content) == 0:
                 errors.append(f"{file.filename}: Empty file")
+                continue
+            
+            # Check max file size
+            max_size = 50 * 1024 * 1024
+            if len(content) > max_size:
+                errors.append(f"{file.filename}: File too large (max 50MB)")
                 continue
             
             # Save file
@@ -311,6 +486,8 @@ async def query_documents(request: QueryRequest):
     
     This is the core RLM endpoint that processes queries using
     recursive LLM calls for efficient long-context retrieval.
+    
+    Uses user-provided API keys from session, or falls back to environment variables.
     """
     import time
     
@@ -324,6 +501,55 @@ async def query_documents(request: QueryRequest):
     
     if not session["documents"]:
         raise HTTPException(status_code=400, detail="No documents uploaded in this session")
+    
+    # Get API keys - prioritize request body, then session, then environment
+    api_keys = session.get("api_keys", {})
+    
+    root_provider = request.root_provider or api_keys.get("root_provider", "openai")
+    sub_provider = request.sub_provider or api_keys.get("sub_provider", "openai")
+    root_model = request.root_model or api_keys.get("root_model", "gpt-4o")
+    sub_model = request.sub_model or api_keys.get("sub_model", "gpt-4o-mini")
+    
+    # Helper to get API key for a provider
+    def get_key_for_provider(provider):
+        if provider == "openai":
+            return request.openai_api_key or api_keys.get("openai_api_key") or os.getenv("OPENAI_API_KEY")
+        elif provider == "anthropic":
+            return request.anthropic_api_key or api_keys.get("anthropic_api_key") or os.getenv("ANTHROPIC_API_KEY")
+        elif provider == "groq":
+            return api_keys.get("groq_api_key") or os.getenv("GROQ_API_KEY")
+        elif provider == "together":
+            return api_keys.get("together_api_key") or os.getenv("TOGETHER_API_KEY")
+        elif provider in ["google", "gemini"]:
+            return api_keys.get("google_api_key") or os.getenv("GOOGLE_API_KEY")
+        elif provider == "mistral":
+            return api_keys.get("mistral_api_key") or os.getenv("MISTRAL_API_KEY")
+        elif provider == "cohere":
+            return api_keys.get("cohere_api_key") or os.getenv("COHERE_API_KEY")
+        elif provider == "deepseek":
+            return api_keys.get("deepseek_api_key") or os.getenv("DEEPSEEK_API_KEY")
+        elif provider == "azure":
+            return api_keys.get("azure_api_key") or os.getenv("AZURE_OPENAI_KEY")
+        elif provider == "ollama":
+            return "ollama"
+        elif provider == "mock":
+            return "mock"
+        return None
+    
+    root_key = get_key_for_provider(root_provider)
+    sub_key = get_key_for_provider(sub_provider)
+    
+    # Validate API keys
+    if root_provider not in ["ollama", "mock"] and not root_key:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"{root_provider.upper()} API key required. Please set your API key in the UI."
+        )
+    if sub_provider not in ["ollama", "mock"] and not sub_key:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{sub_provider.upper()} API key required for sub-model."
+        )
     
     try:
         # Load documents from disk
@@ -341,20 +567,16 @@ async def query_documents(request: QueryRequest):
         # Get context for RLM
         context = combined_doc.get_context_for_rlm()
         
-        # Initialize LLM clients
-        # Use environment variables for API keys
-        root_provider = os.getenv("RLM_ROOT_PROVIDER", "mock")
-        sub_provider = os.getenv("RLM_SUB_PROVIDER", "mock")
-        root_model = os.getenv("RLM_ROOT_MODEL", "gpt-4o-mini")
-        sub_model = os.getenv("RLM_SUB_MODEL", "gpt-4o-mini")
-        
+        # Initialize LLM clients with user-provided keys
         root_client = LLMClientFactory.create(
             provider=root_provider,
-            model=root_model
+            model=root_model,
+            api_key=root_key
         )
         sub_client = LLMClientFactory.create(
             provider=sub_provider,
-            model=sub_model
+            model=sub_model,
+            api_key=sub_key
         )
         
         # Initialize RLM Engine
@@ -392,6 +614,8 @@ async def query_documents(request: QueryRequest):
             processing_time_seconds=round(processing_time, 2)
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         processing_time = time.time() - start_time
         return QueryResponse(
@@ -420,19 +644,26 @@ async def web_interface():
                 body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
                 h1 { color: #333; }
                 .info { background: #f0f0f0; padding: 20px; border-radius: 5px; }
+                .byok { background: #e8f5e9; padding: 15px; border-radius: 5px; margin-top: 20px; border-left: 4px solid #4caf50; }
             </style>
         </head>
         <body>
             <h1>RLM - Recursive Language Model</h1>
             <div class="info">
                 <h2>API is running!</h2>
-                <p>The RLM backend is operational. Use the API endpoints to upload documents and query them.</p>
+                <p>The RLM backend is operational.</p>
                 <p>Key endpoints:</p>
                 <ul>
                     <li><code>POST /upload</code> - Upload a document</li>
                     <li><code>POST /query</code> - Query documents using RLM</li>
                     <li><code>GET /health</code> - Health check</li>
                 </ul>
+            </div>
+            <div class="byok">
+                <h3>Bring Your Own Key (BYOK)</h3>
+                <p>This app uses your own OpenAI or Anthropic API keys. 
+                No costs are incurred by the deployer.</p>
+                <p>Set your keys via: <code>POST /api/keys</code></p>
             </div>
         </body>
         </html>

@@ -4,7 +4,10 @@ A production-ready implementation of **Recursive Language Models (RLM)** as desc
 
 ## 🌟 Features
 
+- **🆓 Zero Cost to Deployer**: Users bring their own API keys (BYOK)
+- **🆓 Zero Cost to Deployer**: Users bring their own API keys (BYOK)
 - **Recursive Language Model (RLM)**: Full implementation of the RLM scaffold from the paper
+- **11 LLM Providers**: OpenAI, Anthropic, Groq, Google, Mistral, Cohere, DeepSeek, Together AI, Azure, Ollama (local), Mock
 - **REPL Environment**: Prompts loaded as variables with programmatic access
 - **Symbolic Recursion**: Code-based decomposition and recursive sub-LM calls
 - **Multi-Format Support**: PDF, DOCX, TXT, Markdown, JSON, Code files
@@ -13,12 +16,21 @@ A production-ready implementation of **Recursive Language Models (RLM)** as desc
 - **REST API**: Full API for integration with other systems
 - **Session Management**: Persistent sessions with multiple document support
 
+## 💰 Bring Your Own Key (BYOK)
+
+**Deploy this app for FREE.** Users provide their own OpenAI/Anthropic API keys:
+
+- ✅ **No API costs for you** (the deployer)
+- ✅ **No subscription needed**
+- ✅ **Keys stored in memory only** (never saved to disk)
+- ✅ **Users pay only for what they use** (~$0.10-$0.50 per document)
+
 ## 🚀 Quick Start
 
 ### Prerequisites
 
 - Python 3.10+
-- OpenAI API key (or use mock mode for testing)
+- OpenAI API key (users bring their own - no cost to deployer!)
 
 ### Installation
 
@@ -41,22 +53,20 @@ pip install -r requirements.txt
 
 ### Configuration
 
-Set environment variables (optional):
+#### Option A: User-Provided Keys (Recommended - Zero Cost to You)
+Users enter their API keys in the web UI. Keys are stored in memory only and never saved to disk.
+
+#### Option B: Default Keys (Not Recommended)
+Set environment variables as fallback:
 
 ```bash
-# LLM Provider Configuration
-export RLM_ROOT_PROVIDER="openai"  # or "anthropic", "mock"
-export RLM_SUB_PROVIDER="openai"
-export RLM_ROOT_MODEL="gpt-4o"
-export RLM_SUB_MODEL="gpt-4o-mini"
-
-# API Keys
-export OPENAI_API_KEY="your-api-key"
-export ANTHROPIC_API_KEY="your-api-key"
-
 # Server Configuration
 export PORT=8000
 export HOST="0.0.0.0"
+
+# Optional: Fallback API keys (if you want to provide default keys)
+# export OPENAI_API_KEY="your-api-key"
+# export ANTHROPIC_API_KEY="your-api-key"
 ```
 
 ### Running the Application
@@ -94,6 +104,19 @@ Traditional LLMs are limited by their context window. RLM overcomes this by:
 
 ## 📚 API Endpoints
 
+### Set API Keys (BYOK)
+```bash
+POST /api/keys
+Content-Type: application/json
+
+{
+  "session_id": "uuid",
+  "openai_api_key": "sk-...",
+  "root_model": "gpt-4o-mini",
+  "sub_model": "gpt-4o-mini"
+}
+```
+
 ### Upload Documents
 ```bash
 POST /upload
@@ -112,8 +135,14 @@ Content-Type: application/json
   "session_id": "uuid",
   "query": "What are the main points?",
   "use_subcalls": true,
-  "max_iterations": 50
+  "max_iterations": 50,
+  "openai_api_key": "sk-..."  // Optional: can use session keys
 }
+```
+
+### Get Available Models
+```bash
+GET /api/models
 ```
 
 ### Get Session Info
