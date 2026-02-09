@@ -604,14 +604,16 @@
                     <div class="form-group">
                         <label>LLM Provider</label>
                         <select id="rootProvider" onchange="updateProviderFields()">
-                            <option value="openai">OpenAI (GPT-4, GPT-4o)</option>
-                            <option value="anthropic">Anthropic (Claude 3.5)</option>
-                            <option value="groq">Groq (Fast Llama/Mixtral)</option>
-                            <option value="together">Together AI (Open Source)</option>
-                            <option value="google">Google (Gemini)</option>
+                            <option value="openai">OpenAI (GPT-5, o3, o4, GPT-4o)</option>
+                            <option value="anthropic">Anthropic (Claude 4.6, 4.5, 3.5)</option>
+                            <option value="groq">Groq (Llama 4, 3.3 - Fast)</option>
+                            <option value="together">Together AI (Llama 4, Open Source)</option>
+                            <option value="google">Google (Gemini 3, 2.5, 1.5)</option>
+                            <option value="kimi">Kimi/Moonshot (K3, K2.5)</option>
                             <option value="mistral">Mistral AI</option>
                             <option value="cohere">Cohere</option>
                             <option value="deepseek">DeepSeek (Cheapest)</option>
+                            <option value="perplexity">Perplexity (Sonar)</option>
                             <option value="azure">Azure OpenAI</option>
                             <option value="ollama">Ollama (Local - FREE)</option>
                             <option value="mock">Mock (Testing)</option>
@@ -655,6 +657,8 @@
                                 <option value="groq">Groq (Fast & Cheap)</option>
                                 <option value="together">Together AI</option>
                                 <option value="deepseek">DeepSeek (Cheapest)</option>
+                                <option value="kimi">Kimi/Moonshot</option>
+                                <option value="perplexity">Perplexity</option>
                             </select>
                         </div>
                     </div>
@@ -818,25 +822,34 @@
                 keyPrefix: 'sk-',
                 keyUrl: 'https://platform.openai.com/api-keys',
                 models: [
+                    {value: 'gpt-5', label: 'GPT-5 ($12/M) [NEW]', cost: '$12'},
+                    {value: 'gpt-5-mini', label: 'GPT-5 Mini ($1.50/M) [NEW]', cost: '$1.50'},
+                    {value: 'gpt-5-nano', label: 'GPT-5 Nano ($0.30/M) [NEW]', cost: '$0.30'},
+                    {value: 'o3', label: 'o3 Reasoning ($20/M) [NEW]', cost: '$20'},
+                    {value: 'o3-pro', label: 'o3 Pro ($40/M) [NEW]', cost: '$40'},
+                    {value: 'o4-mini', label: 'o4-mini ($1.10/M) [NEW]', cost: '$1.10'},
+                    {value: 'gpt-4.5', label: 'GPT-4.5 ($10/M)', cost: '$10'},
                     {value: 'gpt-4o-mini', label: 'GPT-4o Mini ($0.15/M)', cost: '$0.15'},
-                    {value: 'gpt-4o', label: 'GPT-4o ($2.50/M)', cost: '$2.50'},
-                    {value: 'gpt-4-turbo', label: 'GPT-4 Turbo ($10/M)', cost: '$10'}
+                    {value: 'gpt-4o', label: 'GPT-4o ($2.50/M)', cost: '$2.50'}
                 ]
             },
             anthropic: {
                 keyPrefix: 'sk-ant-',
                 keyUrl: 'https://console.anthropic.com/',
                 models: [
-                    {value: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet ($3-15/M)', cost: '$3-15'},
-                    {value: 'claude-3-haiku-20240307', label: 'Claude 3 Haiku ($0.50/M)', cost: '$0.50'}
+                    {value: 'claude-opus-4-6', label: 'Claude Opus 4.6 ($40/M) [NEW]', cost: '$40'},
+                    {value: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5 ($6/M) [NEW]', cost: '$6'},
+                    {value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5 ($1.25/M) [NEW]', cost: '$1.25'},
+                    {value: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet ($3/M)', cost: '$3'}
                 ]
             },
             groq: {
                 keyPrefix: 'gsk_',
                 keyUrl: 'https://console.groq.com/keys',
                 models: [
-                    {value: 'llama-3.1-70b-versatile', label: 'Llama 3.1 70B ($0.59/M)', cost: '$0.59'},
-                    {value: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B ($0.05/M)', cost: '$0.05'},
+                    {value: 'llama-4-maverick', label: 'Llama 4 Maverick ($0.50/M) [NEW]', cost: '$0.50'},
+                    {value: 'llama-4-scout', label: 'Llama 4 Scout ($0.20/M) [NEW]', cost: '$0.20'},
+                    {value: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B ($0.59/M)', cost: '$0.59'},
                     {value: 'mixtral-8x7b-32768', label: 'Mixtral 8x7B ($0.24/M)', cost: '$0.24'}
                 ]
             },
@@ -844,16 +857,30 @@
                 keyPrefix: '',
                 keyUrl: 'https://api.together.xyz/',
                 models: [
-                    {value: 'meta-llama/Llama-3.1-70B-Instruct-Turbo', label: 'Llama 3.1 70B ($0.88/M)', cost: '$0.88'},
-                    {value: 'meta-llama/Llama-3.1-8B-Instruct-Turbo', label: 'Llama 3.1 8B ($0.18/M)', cost: '$0.18'}
+                    {value: 'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8', label: 'Llama 4 Maverick ($0.60/M) [NEW]', cost: '$0.60'},
+                    {value: 'meta-llama/Llama-4-Scout-17B-16E-Instruct', label: 'Llama 4 Scout ($0.25/M) [NEW]', cost: '$0.25'},
+                    {value: 'deepseek-ai/DeepSeek-V3', label: 'DeepSeek V3 ($1.25/M)', cost: '$1.25'},
+                    {value: 'Qwen/Qwen3-72B', label: 'Qwen 3 72B ($0.90/M)', cost: '$0.90'}
                 ]
             },
             google: {
                 keyPrefix: '',
                 keyUrl: 'https://aistudio.google.com/app/apikey',
                 models: [
-                    {value: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash ($0.08/M)', cost: '$0.08'},
-                    {value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro ($3.50/M)', cost: '$3.50'}
+                    {value: 'gemini-3-pro', label: 'Gemini 3 Pro ($5/M) [NEW]', cost: '$5'},
+                    {value: 'gemini-3-flash', label: 'Gemini 3 Flash ($0.50/M) [NEW]', cost: '$0.50'},
+                    {value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro ($3.50/M)', cost: '$3.50'},
+                    {value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash ($0.30/M)', cost: '$0.30'},
+                    {value: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash ($0.08/M)', cost: '$0.08'}
+                ]
+            },
+            kimi: {
+                keyPrefix: '',
+                keyUrl: 'https://platform.moonshot.cn/',
+                models: [
+                    {value: 'kimi-k3', label: 'Kimi K3 ($3/M) [NEW]', cost: '$3'},
+                    {value: 'kimi-k2.5', label: 'Kimi K2.5 ($1.50/M) [NEW]', cost: '$1.50'},
+                    {value: 'kimi-k1.5', label: 'Kimi K1.5 ($0.80/M)', cost: '$0.80'}
                 ]
             },
             mistral: {
@@ -879,6 +906,14 @@
                 models: [
                     {value: 'deepseek-chat', label: 'DeepSeek Chat ($0.07/M)', cost: '$0.07'},
                     {value: 'deepseek-coder', label: 'DeepSeek Coder ($0.07/M)', cost: '$0.07'}
+                ]
+            },
+            perplexity: {
+                keyPrefix: 'pplx-',
+                keyUrl: 'https://www.perplexity.ai/settings/api',
+                models: [
+                    {value: 'sonar-pro', label: 'Sonar Pro ($3/M)', cost: '$3'},
+                    {value: 'sonar', label: 'Sonar ($1/M)', cost: '$1'}
                 ]
             },
             azure: {
