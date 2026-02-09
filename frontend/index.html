@@ -695,7 +695,7 @@
                 <div class="drop-zone" id="dropZone">
                     <div class="icon-large">[UPLOAD]</div>
                     <p>Drag & drop files here or click to browse</p>
-                    <div class="file-types">Supports: PDF, TXT, DOCX, MD, JSON, Code files</div>
+                    <div class="file-types">Supports: PDF, TXT, DOCX, MD, JSON, Code files (Max 100MB)</div>
                     <input type="file" id="fileInput" multiple accept=".pdf,.txt,.docx,.md,.markdown,.json,.py,.js,.java,.cpp,.c,.h,.ts,.tsx,.jsx">
                 </div>
 
@@ -977,7 +977,7 @@
                 }
             }
 
-            // Build request
+            // Build request with proper API key field names
             const requestBody = {
                 session_id: sessionId,
                 root_provider: provider,
@@ -986,15 +986,26 @@
                 sub_model: subModel
             };
             
-            // Add provider-specific key
-            if (provider === 'openai' || provider === 'deepseek') {
-                requestBody.openai_api_key = apiKey;
-            } else if (provider === 'anthropic') {
-                requestBody.anthropic_api_key = apiKey;
-            } else if (provider !== 'mock' && provider !== 'ollama') {
-                // For other providers, use openai_api_key field with provider prefix
-                requestBody.openai_api_key = apiKey;
-                requestBody.provider_type = provider;
+            // Add provider-specific key with CORRECT field name
+            const keyFieldMap = {
+                'openai': 'openai_api_key',
+                'anthropic': 'anthropic_api_key',
+                'google': 'google_api_key',
+                'gemini': 'google_api_key',
+                'kimi': 'kimi_api_key',
+                'moonshot': 'kimi_api_key',
+                'groq': 'groq_api_key',
+                'together': 'together_api_key',
+                'mistral': 'mistral_api_key',
+                'cohere': 'cohere_api_key',
+                'deepseek': 'deepseek_api_key',
+                'perplexity': 'perplexity_api_key',
+                'azure': 'azure_api_key'
+            };
+            
+            if (provider !== 'mock' && provider !== 'ollama') {
+                const keyField = keyFieldMap[provider] || 'openai_api_key';
+                requestBody[keyField] = apiKey;
             }
 
             try {
@@ -1085,14 +1096,42 @@
         });
 
         async function handleFiles(files) {
+            // Validate file sizes (100MB limit per file)
+            const maxSize = 100 * 1024 * 1024;
+            const validFiles = [];
+            
+            for (const file of files) {
+                if (file.size > maxSize) {
+                    showNotification(`${file.name} is too large (max 100MB)`, 'error');
+                } else {
+                    validFiles.push(file);
+                }
+            }
+            
+            if (validFiles.length === 0) {
+                return;
+            }
+            
             const formData = new FormData();
             formData.append('session_id', sessionId);
             
-            for (const file of files) {
+            const totalSize = validFiles.reduce((sum, f) => sum + f.size, 0);
+            for (const file of validFiles) {
                 formData.append('files', file);
             }
 
-            dropZone.innerHTML = '<div class="loading"><div class="spinner"></div>Uploading...</div>';
+            const startTime = Date.now();
+            dropZone.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <div>
+                        <div>Uploading ${validFiles.length} file(s) (${(totalSize / 1024 / 1024).toFixed(1)} MB)...</div>
+                        <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px;">
+                            Large PDFs may take 10-30 seconds to process
+                        </div>
+                    </div>
+                </div>
+            `;
 
             try {
                 const response = await fetch(`${API_URL}/upload-multiple`, {
@@ -1101,11 +1140,12 @@
                 });
 
                 const data = await response.json();
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
                 if (data.success) {
                     uploadedFiles = [...uploadedFiles, ...data.documents];
                     updateFileList();
-                    showNotification(`Uploaded ${data.documents.length} file(s) successfully`, 'success');
+                    showNotification(`✓ Uploaded ${data.documents.length} file(s) in ${elapsed}s`, 'success');
                 } else {
                     showNotification(data.message || 'Upload failed', 'error');
                 }
@@ -1115,7 +1155,7 @@
                 dropZone.innerHTML = `
                     <div class="icon-large">[UPLOAD]</div>
                     <p>Drag & drop files here or click to browse</p>
-                    <div class="file-types">Supports: PDF, TXT, DOCX, MD, JSON, Code files</div>
+                    <div class="file-types">Supports: PDF, TXT, DOCX, MD, JSON, Code files (Max 100MB)</div>
                 `;
             }
         }
@@ -1134,7 +1174,10 @@
                     <div class="name">
                         <span>[${file.doc_type.toUpperCase()}]</span>
                         <span>${file.filename}</span>
-                        <small style="color: var(--text-muted);">(${(file.total_chars / 1000).toFixed(1)}K chars, ${file.num_chunks} chunks)</small>
+                        <small style="color: var(--text-muted);">
+                            (${(file.total_chars / 1000).toFixed(1)}K chars, ${file.num_chunks} chunks
+                            ${file.processing_time_seconds ? `• ${file.processing_time_seconds}s` : ''})
+                        </small>
                     </div>
                     <button class="remove" onclick="removeFile(${index})">X</button>
                 </div>

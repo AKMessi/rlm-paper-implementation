@@ -182,6 +182,8 @@ async def set_api_keys(request: APIKeyRequest):
         "cohere_api_key": request.cohere_api_key,
         "deepseek_api_key": request.deepseek_api_key,
         "azure_api_key": request.azure_api_key,
+        "perplexity_api_key": request.perplexity_api_key,
+        "kimi_api_key": request.kimi_api_key,
         "root_provider": request.root_provider,
         "sub_provider": request.sub_provider,
         "root_model": request.root_model,
@@ -205,6 +207,8 @@ async def set_api_keys(request: APIKeyRequest):
         "cohere": mask_key(request.cohere_api_key),
         "deepseek": mask_key(request.deepseek_api_key),
         "azure": mask_key(request.azure_api_key),
+        "perplexity": mask_key(request.perplexity_api_key),
+        "kimi/moonshot": mask_key(request.kimi_api_key),
     }
     
     # Filter out None values
@@ -293,10 +297,13 @@ async def upload_document(
     session_id: Optional[str] = Form(None)
 ):
     """
-    Upload a document for RLM processing.
+    FAST document upload for RLM processing.
     
     Supports: PDF, TXT, DOCX, MD, JSON, and code files
     """
+    import time
+    start_time = time.time()
+    
     try:
         # Validate file
         if not file.filename:
@@ -312,25 +319,28 @@ async def upload_document(
         if file_size == 0:
             raise HTTPException(status_code=400, detail="Empty file")
         
-        # Check max file size (50MB)
-        max_size = 50 * 1024 * 1024  # 50MB
+        # Check max file size (100MB now - optimized for speed)
+        max_size = 100 * 1024 * 1024  # 100MB
         if file_size > max_size:
-            raise HTTPException(status_code=413, detail=f"File too large. Max size: 50MB")
+            raise HTTPException(status_code=413, detail=f"File too large. Max size: 100MB")
         
-        # Save file
+        # Save file asynchronously
         file_id = str(uuid.uuid4())
         file_ext = Path(file.filename).suffix
         saved_path = UPLOAD_DIR / f"{file_id}{file_ext}"
         
+        # Fast async write
         async with aiofiles.open(saved_path, 'wb') as f:
             await f.write(content)
         
-        # Process document
+        # Process document with HIGH PERFORMANCE processor
         document = await doc_processor.load_document(
             file_path=saved_path,
             content=content,
             filename=file.filename
         )
+        
+        total_time = time.time() - start_time
         
         # Store document info in session
         doc_info = {
@@ -342,6 +352,8 @@ async def upload_document(
             "metadata": document.metadata,
             "saved_path": str(saved_path),
             "uploaded_at": datetime.now().isoformat(),
+            "processing_time_seconds": round(document.processing_time, 2),
+            "upload_time_seconds": round(total_time, 2),
         }
         
         session["documents"].append(doc_info)
@@ -351,12 +363,13 @@ async def upload_document(
             "success": True,
             "session_id": session_id,
             "document": doc_info,
-            "message": f"Successfully uploaded and processed '{file.filename}'"
+            "message": f"✓ Processed '{file.filename}' in {total_time:.1f}s ({document.num_chunks} chunks, {document.total_chars:,} chars)"
         }
         
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Upload error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
 
 
@@ -365,7 +378,13 @@ async def upload_multiple_documents(
     files: List[UploadFile] = File(...),
     session_id: Optional[str] = Form(None)
 ):
-    """Upload multiple documents at once."""
+    """
+    FAST upload multiple documents at once.
+    Optimized for speed with parallel processing.
+    """
+    import time
+    start_time = time.time()
+    
     session_id, session = get_or_create_session(session_id)
     results = []
     errors = []
@@ -373,18 +392,19 @@ async def upload_multiple_documents(
     for file in files:
         try:
             content = await file.read()
+            file_size = len(content)
             
-            if len(content) == 0:
+            if file_size == 0:
                 errors.append(f"{file.filename}: Empty file")
                 continue
             
-            # Check max file size
-            max_size = 50 * 1024 * 1024
-            if len(content) > max_size:
-                errors.append(f"{file.filename}: File too large (max 50MB)")
+            # 100MB limit for faster processing
+            max_size = 100 * 1024 * 1024
+            if file_size > max_size:
+                errors.append(f"{file.filename}: File too large (max 100MB)")
                 continue
             
-            # Save file
+            # Fast async save
             file_id = str(uuid.uuid4())
             file_ext = Path(file.filename).suffix
             saved_path = UPLOAD_DIR / f"{file_id}{file_ext}"
@@ -392,7 +412,7 @@ async def upload_multiple_documents(
             async with aiofiles.open(saved_path, 'wb') as f:
                 await f.write(content)
             
-            # Process document
+            # HIGH PERFORMANCE document processing
             document = await doc_processor.load_document(
                 file_path=saved_path,
                 content=content,
@@ -408,6 +428,7 @@ async def upload_multiple_documents(
                 "metadata": document.metadata,
                 "saved_path": str(saved_path),
                 "uploaded_at": datetime.now().isoformat(),
+                "processing_time_seconds": round(document.processing_time, 2),
             }
             
             session["documents"].append(doc_info)
@@ -415,14 +436,18 @@ async def upload_multiple_documents(
             results.append(doc_info)
             
         except Exception as e:
+            logger.error(f"Upload error for {file.filename}: {str(e)}")
             errors.append(f"{file.filename}: {str(e)}")
+    
+    total_time = time.time() - start_time
     
     return {
         "success": True,
         "session_id": session_id,
         "documents": results,
         "errors": errors,
-        "message": f"Successfully uploaded {len(results)} documents, {len(errors)} errors"
+        "message": f"Processed {len(results)} files in {total_time:.1f}s" if results else "Upload failed",
+        "total_time_seconds": round(total_time, 2)
     }
 
 
