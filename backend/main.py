@@ -132,6 +132,23 @@ app.add_middleware(
 )
 
 
+# Global exception handler to ensure ALL errors return JSON
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    """Catch all unhandled exceptions and return JSON."""
+    import traceback
+    logger.error(f"Unhandled exception: {str(exc)}")
+    logger.error(traceback.format_exc())
+    return JSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "error": f"Server error: {str(exc)}",
+            "detail": str(exc)
+        }
+    )
+
+
 def get_or_create_session(session_id: Optional[str] = None) -> tuple[str, Dict[str, Any]]:
     """Get existing session or create new one."""
     if session_id and session_id in sessions:
@@ -575,55 +592,75 @@ async def query_documents(request: QueryRequest):
             )
         
         # Load documents from disk
-        documents = []
-        for doc_info in session["documents"]:
-            doc = await doc_processor.load_document(doc_info["saved_path"])
-            documents.append(doc)
-        
-        # Combine documents if multiple
-        if len(documents) == 1:
-            combined_doc = documents[0]
-        else:
-            combined_doc = doc_processor.combine_documents(documents)
-        
-        # Get context for RLM
-        context = combined_doc.get_context_for_rlm()
+        try:
+            documents = []
+            for doc_info in session["documents"]:
+                doc = await doc_processor.load_document(doc_info["saved_path"])
+                documents.append(doc)
+            
+            # Combine documents if multiple
+            if len(documents) == 1:
+                combined_doc = documents[0]
+            else:
+                combined_doc = doc_processor.combine_documents(documents)
+            
+            # Get context for RLM
+            context = combined_doc.get_context_for_rlm()
+        except Exception as e:
+            logger.error(f"Error loading documents: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=f"Error loading documents: {str(e)}")
         
         # Initialize LLM clients with user-provided keys
-        root_client = LLMClientFactory.create(
-            provider=root_provider,
-            model=root_model,
-            api_key=root_key
-        )
-        sub_client = LLMClientFactory.create(
-            provider=sub_provider,
-            model=sub_model,
-            api_key=sub_key
-        )
+        try:
+            root_client = LLMClientFactory.create(
+                provider=root_provider,
+                model=root_model,
+                api_key=root_key
+            )
+            sub_client = LLMClientFactory.create(
+                provider=sub_provider,
+                model=sub_model,
+                api_key=sub_key
+            )
+        except Exception as e:
+            logger.error(f"Error creating LLM clients: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=f"Error initializing LLM clients: {str(e)}")
         
         # Initialize RLM Engine
-        if request.use_subcalls:
-            rlm = RLMEngine(
-                root_llm_client=root_client,
-                sub_llm_client=sub_client,
-                max_iterations=request.max_iterations,
-                max_repl_output_chars=2000,
-                sub_llm_max_chars=500000,
-            )
-        else:
-            rlm = RLMEngineNoSubCalls(
-                root_llm_client=root_client,
-                sub_llm_client=sub_client,
-                max_iterations=request.max_iterations,
-                max_repl_output_chars=2000,
-            )
+        try:
+            if request.use_subcalls:
+                rlm = RLMEngine(
+                    root_llm_client=root_client,
+                    sub_llm_client=sub_client,
+                    max_iterations=request.max_iterations,
+                    max_repl_output_chars=2000,
+                    sub_llm_max_chars=500000,
+                )
+            else:
+                rlm = RLMEngineNoSubCalls(
+                    root_llm_client=root_client,
+                    sub_llm_client=sub_client,
+                    max_iterations=request.max_iterations,
+                    max_repl_output_chars=2000,
+                )
+        except Exception as e:
+            logger.error(f"Error creating RLM engine: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=f"Error creating RLM engine: {str(e)}")
         
         # Run RLM
-        result = await rlm.run(
-            query=request.query,
-            context=context,
-            context_type=combined_doc.doc_type
-        )
+        try:
+            result = await rlm.run(
+                query=request.query,
+                context=context,
+                context_type=combined_doc.doc_type
+            )
+        except Exception as e:
+            logger.error(f"Error running RLM: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=f"Error processing query: {str(e)}")
         
         processing_time = time.time() - start_time
         
